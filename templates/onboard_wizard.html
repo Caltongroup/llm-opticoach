@@ -161,15 +161,15 @@
 
                 {% if suggest_fast or suggest_smart %}
                 <div class="bg-blue-500/10 border border-blue-500/40 rounded-2xl p-5 mb-6">
-                    <div class="font-semibold text-blue-300 mb-2"><i class="fa-solid fa-download mr-2"></i>Better models available</div>
-                    <p class="text-sm text-zinc-400 mb-4">We checked your installed models and found better options for your use case. You can download them now or continue with what you have.</p>
+                    <div class="font-semibold text-blue-300 mb-2"><i class="fa-solid fa-download mr-2"></i>Optional upgrade</div>
+                    <p class="text-sm text-zinc-400 mb-4">You can get started with the models you have. But if you want the best experience, grab these first:</p>
 
                     {% if suggest_fast %}
                     <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-4 mb-3">
                         <div class="flex items-start justify-between gap-4">
                             <div>
                                 <div class="font-semibold text-emerald-300">{{ suggest_fast.name }} <span class="text-xs text-zinc-500">({{ suggest_fast.size_gb }} GB)</span></div>
-                                <div class="text-xs text-zinc-500 mb-1">Ideal for: Archer / Orchestrator</div>
+                                <div class="text-xs text-zinc-500 mb-1">Upgrade for: <strong>Archer</strong> (your fast agent below)</div>
                                 <p class="text-sm text-zinc-400">{{ suggest_fast.why }}</p>
                             </div>
                         </div>
@@ -185,7 +185,7 @@
                         <div class="flex items-start justify-between gap-4">
                             <div>
                                 <div class="font-semibold text-blue-300">{{ suggest_smart.name }} <span class="text-xs text-zinc-500">({{ suggest_smart.size_gb }} GB)</span></div>
-                                <div class="text-xs text-zinc-500 mb-1">Ideal for: Heavy Lifter / Deep Coding</div>
+                                <div class="text-xs text-zinc-500 mb-1">Upgrade for: <strong>Heavy Lifter</strong> (your deep coder below)</div>
                                 <p class="text-sm text-zinc-400">{{ suggest_smart.why }}</p>
                             </div>
                         </div>
@@ -204,12 +204,11 @@
                     <div class="border border-emerald-500/40 bg-emerald-500/5 rounded-2xl p-6">
                         <div class="flex items-center gap-2 mb-1">
                             <i class="fa-solid fa-bolt text-emerald-400 text-xl"></i>
-                            <h3 class="text-lg font-semibold">Archer — Fast Agent (Orchestrator)</h3>
+                            <h3 class="text-lg font-semibold">Archer — Your Fast Agent</h3>
                         </div>
                         <p class="text-sm text-zinc-400 mb-4">
-                            Your daily driver. Handles conversations, uses tools (like Hermes), and decides
-                            when a task needs the heavy model. Needs to be <strong>fast</strong> and good at
-                            <strong>tool calling</strong>.
+                            Your daily driver. Handles conversations, uses tools, and decides
+                            when a task needs the heavy model. Needs to be <strong>fast</strong>.
                         </p>
                         
                         <select name="fast_model" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-zinc-100 focus:outline-none focus:border-emerald-500 mb-3">
@@ -224,9 +223,9 @@
                             {% if 'hermes' in default_fast_model|lower %}
                             Purpose-built for tool calling and agent personality. Ideal choice.
                             {% elif 'qwen3' in default_fast_model|lower %}
-                            Good native tool calling support. Solid orchestrator.
+                            Good tool support. Solid pick for Archer.
                             {% else %}
-                            Workable, but consider downloading hermes3:8b for better tool calling.
+                            Workable. For a better fit, download hermes3:8b above.
                             {% endif %}
                         </p>
                     </div>
