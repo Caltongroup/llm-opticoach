@@ -1003,6 +1003,105 @@ async def tune_guide(request: Request, guide_id: str):
                 },
             ],
         },
+        "context": {
+            "icon": "🧠",
+            "title": "Smart Context Management",
+            "subtitle": "The single biggest speedup: feed the model less, get answers faster.",
+            "applies_to": "Both models — especially the deep model",
+            "already_done_note": None,
+            "warning": None,
+            "steps": [
+                {
+                    "title": "Understand why this matters more than hardware tuning",
+                    "description": (
+                        "Your models run at a fixed speed — that's set by memory bandwidth, "
+                        "not clocks or settings. But every request has two phases: "
+                        "(1) reading your prompt (prefill), and (2) generating the answer. "
+                        "A 1K-token prompt takes ~0.1s to read. A 16K-token prompt takes ~2s. "
+                        "The generation speed (tok/s) stays the same, but you wait longer before "
+                        "the first token appears. By turn 20 of a conversation, your prompt can "
+                        "be 10K+ tokens of history — and the model re-reads ALL of it every turn."
+                    ),
+                    "commands": [],
+                    "note": "This is why chatbots feel fast at first and slow down over time.",
+                },
+                {
+                    "title": "Set a practical context length limit",
+                    "description": (
+                        "Ollama defaults to a large context window. If you don't need 16K tokens "
+                        "of history, setting a smaller limit forces older messages out and keeps "
+                        "prefill time low. For most tasks, 4096–8192 tokens is plenty."
+                    ),
+                    "commands": [
+                        "sudo mkdir -p /etc/systemd/system/ollama.service.d",
+                        "sudo bash -c 'cat > /etc/systemd/system/ollama.service.d/context.conf << EOF\n"
+                        "[Service]\n"
+                        'Environment="OLLAMA_CONTEXT_LENGTH=8192"\n'
+                        "EOF'",
+                        "sudo systemctl daemon-reload && sudo systemctl restart ollama",
+                    ],
+                    "note": (
+                        "Start with 8192. If you find the model 'forgets' recent context, "
+                        "bump it up to 16384. Lower values = faster prefill."
+                    ),
+                },
+                {
+                    "title": "Load one model at a time (relay pattern)",
+                    "description": (
+                        "By default Ollama keeps every model you use loaded in memory. "
+                        "Two models = double the RAM pressure. Setting MAX_LOADED_MODELS=1 "
+                        "means Ollama unloads model A before loading model B. You lose a few "
+                        "seconds on the swap, but each model runs with more memory headroom "
+                        "and the system stays out of swap."
+                    ),
+                    "commands": [
+                        "sudo mkdir -p /etc/systemd/system/ollama.service.d",
+                        "sudo bash -c 'cat > /etc/systemd/system/ollama.service.d/memory.conf << EOF\n"
+                        "[Service]\n"
+                        'Environment="OLLAMA_MAX_LOADED_MODELS=1"\n'
+                        'Environment="OLLAMA_KEEP_ALIVE=5m"\n'
+                        "EOF'",
+                        "sudo systemctl daemon-reload && sudo systemctl restart ollama",
+                    ],
+                    "note": (
+                        "This is how multi-model workflows (orchestrator → coder → reviewer) "
+                        "run fast on limited hardware. Each model gets the full memory budget."
+                    ),
+                },
+                {
+                    "title": "Use semantic memory instead of full history",
+                    "description": (
+                        "The most powerful optimization: instead of sending the entire conversation "
+                        "history to the model every turn, store past messages in a vector database "
+                        "(like LanceDB) and retrieve only the 3–5 most relevant memories per request. "
+                        "This keeps your prompt at ~1K tokens no matter how long the session runs. "
+                        "The model gets the RIGHT context, not ALL context — and responds faster."
+                    ),
+                    "commands": [],
+                    "note": (
+                        "This is the pattern used by AgentSoul and similar memory frameworks. "
+                        "Open WebUI also has a built-in memory feature that does this. "
+                        "If you selected 'Agent Framework' mode, your framework likely supports this."
+                    ),
+                },
+                {
+                    "title": "The numbers: what context management actually saves",
+                    "description": (
+                        "Here's a real example on this hardware:\n\n"
+                        "• Turn 1 (short prompt): TTFT ~0.1s, feels instant\n"
+                        "• Turn 20 (full history): TTFT ~2-3s, feels sluggish\n"
+                        "• Turn 20 (with semantic memory, 5 recalls): TTFT ~0.2s, feels instant\n\n"
+                        "The tok/s doesn't change, but the wall-clock time per interaction "
+                        "drops 5-10x because the model isn't re-reading old conversations."
+                    ),
+                    "commands": [],
+                    "note": (
+                        "This matters more than any hardware tuning. Clock locking might give you "
+                        "10-20% more tok/s. Context management gives you 5-10x faster interactions."
+                    ),
+                },
+            ],
+        },
     }
 
     guide = GUIDES.get(guide_id)
