@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ guide.title }} • LLM OptiCoach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <div class="max-w-3xl mx-auto px-6 py-10">
+        <a href="/tune" class="text-emerald-400 hover:text-emerald-300 text-sm flex items-center gap-x-2 mb-8">
+            <i class="fa-solid fa-arrow-left"></i> Back to Tuning Dashboard
+        </a>
+
+        <div class="mb-6">
+            <div class="text-3xl mb-3">{{ guide.icon }}</div>
+            <h1 class="text-3xl font-semibold tracking-tight mb-2">{{ guide.title }}</h1>
+            <p class="text-zinc-400 text-lg">{{ guide.subtitle }}</p>
+        </div>
+
+        {% if guide.applies_to %}
+        <div class="mb-6 inline-flex items-center gap-2 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2 text-sm">
+            <i class="fa-solid fa-tag text-zinc-500"></i>
+            <span class="text-zinc-400">Applies to:</span>
+            <span class="font-medium text-white">{{ guide.applies_to }}</span>
+        </div>
+        {% endif %}
+
+        {% if guide.warning %}
+        <div class="mb-6 bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4 flex gap-3">
+            <i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5"></i>
+            <p class="text-sm text-amber-200">{{ guide.warning }}</p>
+        </div>
+        {% endif %}
+
+        {% if guide.already_done_note %}
+        <div class="mb-6 bg-emerald-500/10 border border-emerald-500/40 rounded-2xl p-4 flex gap-3">
+            <i class="fa-solid fa-circle-check text-emerald-400 mt-0.5"></i>
+            <p class="text-sm text-emerald-200">{{ guide.already_done_note }}</p>
+        </div>
+        {% endif %}
+
+        <!-- Steps -->
+        <div class="space-y-4 mb-8">
+            {% for step in guide.steps %}
+            <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+                <div class="flex items-start gap-4">
+                    <div class="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-sm font-bold text-zinc-300 flex-shrink-0 mt-0.5">
+                        {{ loop.index }}
+                    </div>
+                    <div class="flex-1">
+                        <div class="font-semibold mb-1">{{ step.title }}</div>
+                        <p class="text-sm text-zinc-400 mb-3">{{ step.description }}</p>
+
+                        {% if step.commands %}
+                        <div class="space-y-2">
+                            {% for cmd in step.commands %}
+                            <div class="bg-black/60 border border-zinc-800 rounded-xl p-3 flex items-center justify-between gap-3">
+                                <code class="text-emerald-300 text-sm font-mono">{{ cmd }}</code>
+                                <button
+                                    onclick="copyCmd(this, '{{ cmd | replace("'", "\\'") }}')"
+                                    class="flex-shrink-0 text-xs text-zinc-500 hover:text-zinc-200 px-2 py-1 border border-zinc-700 rounded-lg transition-colors">
+                                    Copy
+                                </button>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        {% if step.note %}
+                        <p class="text-xs text-zinc-500 mt-3">{{ step.note }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Done / measure section -->
+        <div class="bg-zinc-900 border border-yellow-500/40 rounded-3xl p-6">
+            <h2 class="text-xl font-semibold mb-2">Done? Measure the difference.</h2>
+            <p class="text-sm text-zinc-400 mb-4">
+                Run another measurement now and we'll compare it to your baseline automatically.
+            </p>
+            <form method="post" action="/measure-again">
+                <input type="hidden" name="what_changed" value="{{ guide.title }}">
+                <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 transition-colors text-white font-semibold py-3 rounded-2xl">
+                    Measure now — did it help?
+                </button>
+            </form>
+        </div>
+
+        <div class="mt-6 text-center">
+            <a href="/tune" class="text-zinc-500 hover:text-zinc-300 text-sm">← Back to all optimizations</a>
+        </div>
+    </div>
+
+    <script>
+        function copyCmd(btn, text) {
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = 'Copied!';
+                btn.classList.add('text-emerald-400', 'border-emerald-700');
+                setTimeout(() => {
+                    btn.textContent = 'Copy';
+                    btn.classList.remove('text-emerald-400', 'border-emerald-700');
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>

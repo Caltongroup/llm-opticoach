@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safe Optimizations • LLM OptiCoach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <div class="max-w-4xl mx-auto px-6 py-10">
+        <a href="/" class="text-emerald-400 text-sm">← Back</a>
+        <h1 class="text-3xl font-semibold tracking-tight mt-6 mb-2">Safe Optimizations</h1>
+        <p class="text-zinc-400 mb-8">Low-risk, high-impact fixes. The AI referee will review before you run anything.</p>
+
+        <div class="space-y-6">
+            <!-- Power Mode -->
+            <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-6">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <div class="font-semibold text-lg">Set MAXN Power Mode + Max Clocks (Jetson)</div>
+                        <div class="text-sm text-zinc-400 mt-1">Most common fix for slow performance on Orin.</div>
+                    </div>
+                    <span class="text-[10px] px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-2xl font-medium h-fit">LOW RISK</span>
+                </div>
+                <div class="mt-4 font-mono text-xs bg-black/70 p-4 rounded-2xl text-emerald-300">sudo nvpmodel -m 0 && sudo jetson_clocks</div>
+                <form action="/referee" method="post" class="mt-4">
+                    <input type="hidden" name="proposed_change" value="sudo nvpmodel -m 0 && sudo jetson_clocks">
+                    <button class="text-sm px-5 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-2xl flex items-center gap-x-2">
+                        <i class="fa-solid fa-balance-scale"></i> Ask AI Referee
+                    </button>
+                </form>
+            </div>
+
+            <!-- vLLM flags -->
+            <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-6">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <div class="font-semibold text-lg">Better vLLM Flags (Qwen 27B AWQ)</div>
+                        <div class="text-sm text-zinc-400 mt-1">Enables prefix caching + chunked prefill.</div>
+                    </div>
+                    <span class="text-[10px] px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-2xl font-medium h-fit">LOW RISK</span>
+                </div>
+                <div class="mt-4 font-mono text-xs bg-black/70 p-4 rounded-2xl text-emerald-300">vllm serve ... --enable-prefix-caching --enable-chunked-prefill --gpu-memory-utilization 0.82</div>
+                <form action="/referee" method="post" class="mt-4">
+                    <input type="hidden" name="proposed_change" value="Add these vLLM flags: --enable-prefix-caching --enable-chunked-prefill --gpu-memory-utilization 0.82">
+                    <button class="text-sm px-5 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-2xl flex items-center gap-x-2">
+                        <i class="fa-solid fa-balance-scale"></i> Ask AI Referee
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

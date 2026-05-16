@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnostic Results • LLM OptiCoach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <div class="max-w-5xl mx-auto px-6 py-10">
+        <a href="/" class="text-emerald-400 hover:text-emerald-300 text-sm flex items-center gap-x-2">
+            <i class="fa-solid fa-arrow-left"></i> Back to home
+        </a>
+        <h1 class="text-3xl font-semibold tracking-tight mt-6 mb-8">Diagnostic Scan Results</h1>
+
+        {% set nvpmodel = report.power_clocks.get("nvpmodel", {}) %}
+        {% set jetson_clocks = report.power_clocks.get("jetson_clocks", {}) %}
+        {% set nvp_text = (nvpmodel.get("stdout", "") ~ " " ~ nvpmodel.get("stderr", "")) | upper %}
+        {% set maxn_ok = "MAXN" in nvp_text %}
+        {% set serving_processes = report.serving.get("processes", "") %}
+        {% set docker_info = report.serving.get("docker", {}) %}
+        {% set docker_names = docker_info.get("stdout", "") %}
+        {% set active_models = report.serving.get("active_models", []) %}
+        {% set orchestrators = report.serving.get("orchestrators_detected", []) %}
+        {% set fallback_hints = report.serving.get("fallback_hints", []) %}
+        {% set routing = report.serving.get("routing", {}) %}
+        {% set primary_model_candidate = report.serving.get("primary_model_candidate") %}
+        {% set fallback_chain = report.serving.get("fallback_chain", []) %}
+        {% set routing_risk = report.serving.get("routing_risk", "medium") %}
+        {% set routing_confidence = routing.get("confidence", "low") %}
+        {% set routing_sources = routing.get("policy_sources", []) %}
+        {% set route_endpoints = routing.get("route_endpoints", []) %}
+        {% set runtime_notes = report.serving.get("runtime_notes", []) %}
+        {% set installed_models = report.serving.get("installed_models", []) %}
+        {% set actionable_issues = report.auto_issues | selectattr("severity", "in", ["high", "medium"]) | list %}
+        {% set routing_assertion = routing_assertion if routing_assertion is defined else None %}
+        {% set routing_assertion_note = routing_assertion_note if routing_assertion_note is defined else None %}
+        {% set top_issue = report.auto_issues[0] if report.auto_issues else None %}
+        {% set top_issue_text = (top_issue.issue | lower) if top_issue else "" %}
+
+        {% if not maxn_ok %}
+        {% set next_step_title = "Do the next best step: enable maximum performance mode" %}
+        {% set next_step_desc = "Your power mode is not in MAXN. Fix this first before benchmarking anything else." %}
+        {% set next_step_cta = "Show Fix Command" %}
+        {% set next_step_href = "#fix-power-mode-panel" %}
+        {% elif not serving_processes.strip() %}
+        {% set next_step_title = "Do the next best step: start your model runtime" %}
+        {% set next_step_desc = "No active serving process detected. Start Ollama, vLLM, or TensorRT-LLM first." %}
+        {% set next_step_cta = "Go to Runtime Hint" %}
+        {% set next_step_href = "#runtime-hint" %}
+        {% elif not benchmark or not benchmark.success %}
+        {% set next_step_title = "Do the next best step: run your first benchmark" %}
+        {% set next_step_desc = "Measure baseline latency and tokens/sec so every fix can be compared with evidence." %}
+        {% set next_step_cta = "Go to Benchmark" %}
+        {% set next_step_href = "#benchmark" %}
+        {% elif benchmark and benchmark.success and not benchmark_delta %}
+        {% set next_step_title = "Do the next best step: apply one fix, then benchmark again" %}
+        {% set next_step_desc = "You have a baseline. Change one thing (power/runtime/model) and run benchmark again to compare." %}
+        {% set next_step_cta = "Go to Benchmark" %}
+        {% set next_step_href = "#benchmark" %}
+        {% else %}
+        {% set next_step_title = "Do the next best step: lock in decision evidence" %}
+        {% set next_step_desc = "You have before/after data. Run one more confirmation benchmark, then decide keep or return." %}
+        {% set next_step_cta = "Go to Benchmark" %}
+        {% set next_step_href = "#benchmark" %}
+        {% endif %}
+
+        <div class="mb-8 bg-zinc-900 border border-cyan-500/40 rounded-3xl p-6">
+            <div class="text-xs uppercase tracking-widest text-cyan-300 mb-2">Smart Next Action</div>
+            <h2 class="text-xl font-semibold mb-2">{{ next_step_title }}</h2>
+            <p class="text-sm text-zinc-300 mb-4">{{ next_step_desc }}</p>
+            {% if next_step_href == "#fix-power-mode-panel" %}
+            <button
+                type="button"
+                class="bg-cyan-600 hover:bg-cyan-500 transition-colors text-white font-semibold px-6 py-2.5 rounded-2xl"
+                onclick="document.getElementById('fix-power-mode-panel').classList.remove('hidden'); document.getElementById('fix-power-mode-panel').scrollIntoView({behavior: 'smooth', block: 'center'});"
+            >
+                {{ next_step_cta }}
+            </button>
+            {% else %}
+            <a href="{{ next_step_href }}" class="inline-block bg-cyan-600 hover:bg-cyan-500 transition-colors text-white font-semibold px-6 py-2.5 rounded-2xl">
+                {{ next_step_cta }}
+            </a>
+            {% endif %}
+        </div>
+
+        <div class="mb-8 bg-zinc-900 border border-emerald-500/40 rounded-3xl p-6">
+            <h2 class="text-xl font-semibold mb-3">Start Here: Tuning for Dummies</h2>
+            <div class="space-y-2 text-sm text-zinc-300">
+                <div><span class="font-semibold text-zinc-100">1. Power mode:</span> {% if maxn_ok %}<span class="text-emerald-300">Looks good (MAXN)</span>{% else %}<span class="text-amber-300">Not in MAXN</span> - run <span class="font-mono text-emerald-300">sudo nvpmodel -m 0 && sudo jetson_clocks</span>{% endif %}</div>
+                <div id="runtime-hint"><span class="font-semibold text-zinc-100">2. Model runtime:</span> {% if serving_processes.strip() %}<span class="text-emerald-300">Running</span>{% else %}<span class="text-amber-300">Not running</span> - start one (example: <span class="font-mono text-emerald-300">ollama run qwen2.5-coder:7b</span>){% endif %}</div>
+                <div><span class="font-semibold text-zinc-100">3. Measure speed:</span> run the benchmark below 3 times, then apply one fix and compare.</div>
+            </div>
+        </div>
+
+        <div class="mb-8 bg-zinc-900 border rounded-3xl p-6 {% if maxn_ok %}border-emerald-500/40{% else %}border-amber-500/40{% endif %}">
+            <div class="text-xs uppercase tracking-widest {% if maxn_ok %}text-emerald-400{% else %}text-amber-400{% endif %}">Quick bottleneck summary</div>
+            {% if not maxn_ok %}
+            <p class="mt-2 text-lg font-semibold">Your biggest bottleneck appears to be power mode not set to MAXN.</p>
+            <p class="mt-1 text-sm text-zinc-400">The GPU may be capped and unable to sustain best LLM throughput.</p>
+            {% elif top_issue and "needs root" in top_issue_text %}
+            <p class="mt-2 text-lg font-semibold">Core performance signals look healthy. One verification step still needs root access.</p>
+            <p class="mt-1 text-sm text-zinc-400">Run the suggested command once to confirm clock lock status, then rescan.</p>
+            {% elif not serving_processes.strip() %}
+            <p class="mt-2 text-lg font-semibold">Your biggest bottleneck appears to be that no active LLM serving process was detected.</p>
+            <p class="mt-1 text-sm text-zinc-400">No vLLM, TensorRT-LLM, Ollama, or llama.cpp process is currently visible.</p>
+            {% elif report.auto_issues %}
+            <p class="mt-2 text-lg font-semibold">Your biggest bottleneck appears to be: {{ report.auto_issues[0].issue }}</p>
+            <p class="mt-1 text-sm text-zinc-400">Area: {{ report.auto_issues[0].area }}</p>
+            {% else %}
+            <p class="mt-2 text-lg font-semibold">Your biggest bottleneck appears to be serving/runtime tuning rather than a hard platform misconfiguration.</p>
+            <p class="mt-1 text-sm text-zinc-400">Power mode looks healthy and at least one serving stack process is detected.</p>
+            {% endif %}
+        </div>
+
+        {% if actionable_issues %}
+        <div class="mb-8">
+            <h2 class="font-semibold mb-4 flex items-center gap-x-2 text-amber-400">
+                <i class="fa-solid fa-exclamation-triangle"></i> Auto-detected issues
+            </h2>
+            {% for issue in actionable_issues %}
+            <div class="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 mb-3">
+                <div class="font-medium">{{ issue.area }}</div>
+                <div class="text-zinc-400 text-sm mt-1">{{ issue.issue }}</div>
+                <div class="mt-3 text-xs font-mono bg-black/70 p-3 rounded-xl text-emerald-300">{{ issue.fix }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-6">
+                <h3 class="font-semibold mb-4 flex items-center gap-x-2"><i class="fa-solid fa-bolt text-emerald-400"></i> Power &amp; Clocks</h3>
+                {% if nvpmodel %}
+                <div class="mb-4 p-4 rounded-2xl border {% if maxn_ok %}bg-emerald-500/10 border-emerald-500/40{% else %}bg-amber-500/10 border-amber-500/40{% endif %}">
+                    {% if maxn_ok %}
+                    <div class="text-sm font-semibold text-emerald-300">Power Mode: MAXN</div>
+                    <p class="text-xs text-zinc-300 mt-1">Jetson is reporting MAXN mode.</p>
+                    {% else %}
+                    <div class="text-sm font-semibold text-amber-300">Warning: MAXN mode not detected</div>
+                    <p class="text-xs text-zinc-300 mt-1">Suggested command:</p>
+                    <div class="mt-2 font-mono text-xs bg-black/60 p-3 rounded-xl text-emerald-300">sudo nvpmodel -m 0 && sudo jetson_clocks</div>
+                    {% endif %}
+                </div>
+
+                {% if not maxn_ok %}
+                <div class="mb-4">
+                    <button
+                        type="button"
+                        class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-2xl transition-colors"
+                        onclick="document.getElementById('fix-power-mode-panel').classList.toggle('hidden')"
+                    >
+                        Fix Power Mode Now
+                    </button>
+                    <div id="fix-power-mode-panel" class="hidden mt-3 bg-zinc-950 border border-emerald-500/40 rounded-2xl p-4">
+                        <div class="text-xs uppercase tracking-wider text-emerald-400 mb-2">Run this command</div>
+                        <div class="font-mono text-xs bg-black/60 p-3 rounded-xl text-emerald-300">sudo nvpmodel -m 0 && sudo jetson_clocks</div>
+                        <p class="text-xs text-zinc-300 mt-3">This sets maximum performance mode and locks the GPU to highest clocks. Run it in your terminal, then refresh this page.</p>
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="space-y-3">
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3">
+                        <div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">nvpmodel output</div>
+                        <pre class="text-xs text-zinc-200 font-mono whitespace-pre-wrap break-words">{{ nvpmodel.get("stdout", "No output") }}</pre>
+                    </div>
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3">
+                        <div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">jetson_clocks status</div>
+                        <pre class="text-xs text-zinc-200 font-mono whitespace-pre-wrap break-words">{{ jetson_clocks.get("stdout") or jetson_clocks.get("stderr") or jetson_clocks.get("error") or "No output" }}</pre>
+                    </div>
+                </div>
+                {% else %}
+                <div class="text-zinc-400 text-sm bg-zinc-950 border border-zinc-800 rounded-2xl p-4">No power/clock data was detected.</div>
+                {% endif %}
+                <details class="mt-4">
+                    <summary class="cursor-pointer text-emerald-400 text-sm">View raw JSON</summary>
+                    <pre class="mt-3 text-xs bg-black/60 p-4 rounded-2xl overflow-auto max-h-80 whitespace-pre-wrap break-words">{{ report.power_clocks | tojson(indent=2) }}</pre>
+                </details>
+            </div>
+            <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-6">
+                <h3 class="font-semibold mb-4 flex items-center gap-x-2"><i class="fa-solid fa-memory text-emerald-400"></i> Memory &amp; GPU</h3>
+                <details>
+                    <summary class="cursor-pointer text-emerald-400 text-sm">View detailed machine stats</summary>
+                    <pre class="mt-3 text-xs bg-black/60 p-4 rounded-2xl overflow-auto max-h-80 whitespace-pre-wrap break-words">{{ report.memory_gpu | tojson(indent=2) }}</pre>
+                </details>
+            </div>
+            <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 lg:col-span-2">
+                <h3 class="font-semibold mb-4 flex items-center gap-x-2"><i class="fa-solid fa-server text-emerald-400"></i> Detected LLM Serving Stack</h3>
+                {% if report.serving %}
+                <div class="mb-4 border rounded-2xl p-4 {% if routing_risk == 'high' %}border-rose-500/40 bg-rose-500/10{% elif routing_risk == 'low' %}border-emerald-500/40 bg-emerald-500/10{% else %}border-amber-500/40 bg-amber-500/10{% endif %}">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                        <div class="text-sm font-semibold">Routing Intelligence</div>
+                        <div class="text-xs uppercase tracking-wider {% if routing_risk == 'high' %}text-rose-300{% elif routing_risk == 'low' %}text-emerald-300{% else %}text-amber-300{% endif %}">
+                            Risk: {{ routing_risk }} | Confidence: {{ routing_confidence }}
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3">
+                            <div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Inferred primary model</div>
+                            <div class="font-mono text-zinc-100 break-all">{{ primary_model_candidate or 'Unknown' }}</div>
+                        </div>
+                        <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3">
+                            <div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Fallback chain</div>
+                            {% if fallback_chain %}
+                            <div class="space-y-1">
+                                {% for model_name in fallback_chain %}
+                                <div class="font-mono text-zinc-100 break-all">{{ loop.index }}. {{ model_name }}</div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="text-zinc-400">No explicit fallback model chain detected.</div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if route_endpoints %}
+                    <div class="mt-3 text-xs text-zinc-300">
+                        Route endpoint hints:
+                        {% for endpoint in route_endpoints %}
+                        <span class="font-mono text-cyan-300 break-all">{{ endpoint }}</span>{% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    {% if routing_sources %}
+                    <details class="mt-3">
+                        <summary class="cursor-pointer text-xs text-cyan-300">Policy sources used for inference</summary>
+                        <div class="mt-2 text-xs text-zinc-400 space-y-1">
+                            {% for src in routing_sources %}
+                            <div class="font-mono break-all">{{ src }}</div>
+                            {% endfor %}
+                        </div>
+                    </details>
+                    {% endif %}
+
+                    <form action="/routing-assert" method="post" class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-2">
+                        <input name="api_key" type="password" placeholder="API key (optional if saved)" class="md:col-span-2 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400">
+                        <input name="base_url" type="text" value="{{ prefill_base_url or 'https://api.openai.com/v1' }}" class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400">
+                        <input name="model" type="text" value="{{ prefill_model or 'gpt-4o-mini' }}" class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400">
+                        <button type="submit" class="md:col-span-4 bg-cyan-600 hover:bg-cyan-500 transition-colors text-white font-semibold px-4 py-2 rounded-xl text-sm">Run Routing Assertion Test</button>
+                    </form>
+
+                    {% if routing_assertion_note %}
+                    <div class="mt-3 text-xs text-cyan-200 bg-cyan-500/10 border border-cyan-500/30 rounded-xl px-3 py-2">{{ routing_assertion_note }}</div>
+                    {% endif %}
+
+                    {% if routing_assertion %}
+                    <div class="mt-3 border rounded-xl p-3 {% if routing_assertion.success and routing_assertion.verdict == 'pass' %}border-emerald-500/40 bg-emerald-500/10{% elif routing_assertion.success %}border-amber-500/40 bg-amber-500/10{% else %}border-rose-500/40 bg-rose-500/10{% endif %}">
+                        <div class="text-xs uppercase tracking-wider mb-2 {% if routing_assertion.success and routing_assertion.verdict == 'pass' %}text-emerald-300{% elif routing_assertion.success %}text-amber-300{% else %}text-rose-300{% endif %}">
+                            Routing Assertion Result
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-zinc-200">
+                            <div><span class="text-zinc-400">Requested model:</span> <span class="font-mono">{{ routing_assertion.requested_model }}</span></div>
+                            <div><span class="text-zinc-400">Reported response model:</span> <span class="font-mono">{{ routing_assertion.reported_response_model or 'Unknown' }}</span></div>
+                            <div><span class="text-zinc-400">Expected primary:</span> <span class="font-mono">{{ routing_assertion.expected_primary or 'Unknown' }}</span></div>
+                            <div><span class="text-zinc-400">Matches expected chain:</span> <span class="font-mono">{{ 'yes' if routing_assertion.model_in_expected_chain else 'no' }}</span></div>
+                        </div>
+                        {% if routing_assertion.response_preview %}
+                        <div class="mt-2 text-xs text-zinc-300">Response preview: <span class="text-zinc-100">{{ routing_assertion.response_preview }}</span></div>
+                        {% endif %}
+                        {% if routing_assertion.error %}
+                        <div class="mt-2 text-xs text-rose-200">Error: {{ routing_assertion.error }}</div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    {% if runtime_notes %}
+                    <div class="mt-3 text-xs text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2">
+                        {% for note in runtime_notes %}
+                        <div>{{ note }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3">
+                        <div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-2">Active model(s)</div>
+                        {% if active_models %}
+                        <div class="space-y-1">
+                            {% for model_name in active_models %}
+                            <div class="text-sm font-mono text-emerald-300 break-all">{{ model_name }}</div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-sm text-zinc-400">No model name detected from process probes.</div>
+                        {% if installed_models %}
+                        <div class="text-xs text-zinc-500 mt-2">Installed (Ollama): {{ installed_models[:4] | join(', ') }}{% if installed_models|length > 4 %}, ...{% endif %}</div>
+                        {% endif %}
+                        {% endif %}
+                    </div>
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3">
+                        <div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-2">Orchestrators detected</div>
+                        {% if orchestrators %}
+                        <div class="space-y-1">
+                            {% for orch in orchestrators %}
+                            <div class="text-sm text-cyan-300">{{ orch }}</div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-sm text-zinc-400">None detected in process/container names.</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3">
+                        <div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-2">Fallback routing hints</div>
+                        {% if fallback_hints %}
+                        <div class="text-xs text-zinc-300">Potential handoff/fallback signal found in command lines.</div>
+                        {% else %}
+                        <div class="text-sm text-zinc-400">No explicit fallback or handoff hint detected.</div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+                    <div>
+                        <div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-2">Active serving processes</div>
+                        {% if serving_processes.strip() %}
+                        <div class="space-y-2">
+                            {% for line in serving_processes.splitlines() %}
+                            {% set lower_line = line | lower %}
+                            <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3">
+                                <div class="flex items-center justify-between gap-3 mb-2">
+                                    {% if "vllm" in lower_line %}
+                                    <span class="text-[10px] uppercase tracking-widest px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-300">vLLM</span>
+                                    {% elif "tensorrt" in lower_line %}
+                                    <span class="text-[10px] uppercase tracking-widest px-2 py-1 rounded-lg bg-cyan-500/10 text-cyan-300">TensorRT-LLM</span>
+                                    {% elif "ollama" in lower_line %}
+                                    <span class="text-[10px] uppercase tracking-widest px-2 py-1 rounded-lg bg-blue-500/10 text-blue-300">Ollama</span>
+                                    {% elif "llama.cpp" in lower_line %}
+                                    <span class="text-[10px] uppercase tracking-widest px-2 py-1 rounded-lg bg-purple-500/10 text-purple-300">llama.cpp</span>
+                                    {% else %}
+                                    <span class="text-[10px] uppercase tracking-widest px-2 py-1 rounded-lg bg-zinc-700 text-zinc-300">Process</span>
+                                    {% endif %}
+                                </div>
+                                <pre class="text-xs text-zinc-200 font-mono whitespace-pre-wrap break-words">{{ line }}</pre>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-zinc-400 text-sm bg-zinc-950 border border-zinc-800 rounded-2xl p-4">No matching serving process is currently running.</div>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-2">Docker containers</div>
+                        {% if docker_names.strip() and "docker not available" not in (docker_names | lower) %}
+                        <div class="space-y-2">
+                            {% for name in docker_names.splitlines() %}
+                            {% if name.strip() %}
+                            <div class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 font-mono text-sm text-zinc-200">{{ name }}</div>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-zinc-400 text-sm bg-zinc-950 border border-zinc-800 rounded-2xl p-4">No running Docker containers detected for model serving.</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% else %}
+                <div class="text-zinc-400 text-sm bg-zinc-950 border border-zinc-800 rounded-2xl p-4">No serving stack data was detected.</div>
+                {% endif %}
+                <details class="mt-4">
+                    <summary class="cursor-pointer text-emerald-400 text-sm">View raw JSON</summary>
+                    <pre class="mt-3 text-xs bg-black/60 p-4 rounded-2xl overflow-auto max-h-80 whitespace-pre-wrap break-words">{{ report.serving | tojson(indent=2) }}</pre>
+                </details>
+            </div>
+        </div>
+
+        <section id="coach" class="mt-10 bg-zinc-900 border border-zinc-700 rounded-3xl p-6">
+            <h2 class="text-xl font-semibold mb-2 flex items-center gap-x-2">
+                <i class="fa-solid fa-comments text-emerald-400"></i> Talk to AI Coach
+            </h2>
+            <p class="text-sm text-zinc-400 mb-5">Describe your real issue (for example: slow coding completions, high latency, memory pressure), then submit your model API settings.</p>
+
+            <form action="/coach" method="post" class="space-y-4">
+                <div>
+                    <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-2" for="user_notes">Your notes</label>
+                    <textarea
+                        id="user_notes"
+                        name="user_notes"
+                        rows="4"
+                        required
+                        class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500"
+                        placeholder="Example: 8-10 minute coding test responses. Need faster first token and better sustained throughput."
+                    ></textarea>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-2" for="api_key">API key</label>
+                        <input
+                            id="api_key"
+                            name="api_key"
+                            type="password"
+                            required
+                            class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500"
+                            placeholder="sk-..."
+                        >
+                    </div>
+                    <div>
+                        <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-2" for="model">Model</label>
+                        <input
+                            id="model"
+                            name="model"
+                            type="text"
+                            value="{{ prefill_model or 'gpt-4o-mini' }}"
+                            class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500"
+                        >
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-2" for="base_url">Base URL</label>
+                    <input
+                        id="base_url"
+                        name="base_url"
+                        type="text"
+                        value="{{ prefill_base_url or 'https://api.openai.com/v1' }}"
+                        class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500"
+                    >
+                </div>
+
+                <button type="submit" class="w-full md:w-auto bg-emerald-600 hover:bg-emerald-500 transition-colors text-white font-semibold px-7 py-3 rounded-2xl inline-flex items-center gap-x-2">
+                    <i class="fa-solid fa-paper-plane"></i> Get AI Coaching
+                </button>
+            </form>
+        </section>
+
+        <section id="benchmark" class="mt-10 bg-zinc-900 border border-zinc-700 rounded-3xl p-6">
+            <h2 class="text-xl font-semibold mb-2 flex items-center gap-x-2">
+                <i class="fa-solid fa-stopwatch text-cyan-300"></i> Quick Benchmark Loop
+            </h2>
+            <p class="text-sm text-zinc-400 mb-4">Run repeatable latency/throughput checks and compare before-vs-after changes for keep/return evidence.</p>
+
+            <form action="/benchmark" method="post" class="space-y-4">
+                <div>
+                    <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-2" for="benchmark_prompt">Benchmark prompt</label>
+                    <textarea
+                        id="benchmark_prompt"
+                        name="benchmark_prompt"
+                        rows="3"
+                        class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-cyan-400"
+                    >Measure coding assistant response quality and speed for Jetson local developer workflow.</textarea>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <input name="api_key" type="password" placeholder="API key (optional if already saved)" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-cyan-400">
+                    <input name="base_url" type="text" value="{{ prefill_base_url or 'https://api.openai.com/v1' }}" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-cyan-400">
+                    <input name="model" type="text" value="{{ prefill_model or 'gpt-4o-mini' }}" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-cyan-400">
+                </div>
+
+                <div class="flex flex-wrap gap-3">
+                    <button name="action" value="run" type="submit" class="bg-cyan-600 hover:bg-cyan-500 transition-colors text-white font-semibold px-6 py-2.5 rounded-2xl">Run Benchmark</button>
+                    <button name="action" value="set_baseline" type="submit" class="bg-zinc-800 hover:bg-zinc-700 transition-colors text-zinc-100 font-medium px-6 py-2.5 rounded-2xl">Set Latest as Baseline</button>
+                    <button name="action" value="clear_baseline" type="submit" class="bg-zinc-800 hover:bg-zinc-700 transition-colors text-zinc-100 font-medium px-6 py-2.5 rounded-2xl">Clear Baseline</button>
+                </div>
+            </form>
+
+            {% if benchmark_note %}
+            <div class="mt-4 text-xs text-cyan-200 bg-cyan-500/10 border border-cyan-500/30 rounded-xl px-3 py-2">{{ benchmark_note }}</div>
+            {% endif %}
+
+            {% if benchmark %}
+            <div class="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="text-[11px] uppercase tracking-widest text-zinc-500">TTFT</div>
+                    <div class="text-2xl font-semibold mt-1">{{ benchmark.ttft_s if benchmark.ttft_s is not none else 'n/a' }}<span class="text-sm text-zinc-400"> s</span></div>
+                </div>
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="text-[11px] uppercase tracking-widest text-zinc-500">Tokens / sec</div>
+                    <div class="text-2xl font-semibold mt-1">{{ benchmark.tokens_per_second }}</div>
+                </div>
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="text-[11px] uppercase tracking-widest text-zinc-500">Elapsed</div>
+                    <div class="text-2xl font-semibold mt-1">{{ benchmark.elapsed_s }}<span class="text-sm text-zinc-400"> s</span></div>
+                </div>
+            </div>
+
+            {% if benchmark.success %}
+            <div class="mt-4 text-xs text-zinc-400">Response preview: <span class="text-zinc-300">{{ benchmark.response_preview }}</span></div>
+            {% else %}
+            <div class="mt-4 text-xs text-rose-200 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">Benchmark error: {{ benchmark.error }}</div>
+            {% endif %}
+            {% endif %}
+
+            {% if benchmark_delta %}
+            <div class="mt-5 bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                <div class="text-sm font-semibold mb-3">Before vs After Delta</div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                    <div>
+                        <div class="text-zinc-500">TTFT delta</div>
+                        <div class="font-medium {% if benchmark_delta.ttft_s.delta_pct is not none and benchmark_delta.ttft_s.delta_pct < 0 %}text-emerald-300{% else %}text-amber-300{% endif %}">
+                            {{ benchmark_delta.ttft_s.delta_pct if benchmark_delta.ttft_s.delta_pct is not none else 'n/a' }}%
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-zinc-500">Tokens/sec delta</div>
+                        <div class="font-medium {% if benchmark_delta.tokens_per_second.delta_pct is not none and benchmark_delta.tokens_per_second.delta_pct > 0 %}text-emerald-300{% else %}text-amber-300{% endif %}">
+                            {{ benchmark_delta.tokens_per_second.delta_pct if benchmark_delta.tokens_per_second.delta_pct is not none else 'n/a' }}%
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-zinc-500">Elapsed delta</div>
+                        <div class="font-medium {% if benchmark_delta.elapsed_s.delta_pct is not none and benchmark_delta.elapsed_s.delta_pct < 0 %}text-emerald-300{% else %}text-amber-300{% endif %}">
+                            {{ benchmark_delta.elapsed_s.delta_pct if benchmark_delta.elapsed_s.delta_pct is not none else 'n/a' }}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if benchmark and benchmark.success %}
+            {% set keep_ready = (benchmark.ttft_s is not none and benchmark.ttft_s <= 3.0) and (benchmark.tokens_per_second >= 20) %}
+            <div class="mt-5 border rounded-2xl p-4 {% if keep_ready %}border-emerald-500/40 bg-emerald-500/10{% else %}border-amber-500/40 bg-amber-500/10{% endif %}">
+                <div class="text-sm font-semibold {% if keep_ready %}text-emerald-300{% else %}text-amber-300{% endif %}">
+                    {% if keep_ready %}
+                    Keep/Return Signal: leaning KEEP
+                    {% else %}
+                    Keep/Return Signal: evidence still inconclusive
+                    {% endif %}
+                </div>
+                <p class="text-xs text-zinc-300 mt-2">
+                    {% if keep_ready %}
+                    Current benchmark meets quick viability thresholds for interactive coding-style inference.
+                    {% else %}
+                    Run at least 3 repeated benchmarks after power/runtime optimizations to confirm whether this kit meets your target experience.
+                    {% endif %}
+                </p>
+            </div>
+            {% endif %}
+        </section>
+
+        <div class="mt-10 flex gap-x-4">
+            <a href="/optimizations" class="flex-1 text-center bg-emerald-600 hover:bg-emerald-500 transition-colors py-4 rounded-2xl font-medium">Go to Safe Optimizations</a>
+            <a href="#coach" class="flex-1 text-center border border-zinc-700 hover:bg-zinc-900 py-4 rounded-2xl font-medium">Talk to AI Coach about these results</a>
+        </div>
+    </div>
+</body>
+</html>

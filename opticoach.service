@@ -1,0 +1,14 @@
+[Unit]
+Description=LLM OptiCoach — local AI setup wizard
+After=network.target ollama.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/llm_opti_coach
+ExecStart=%h/llm_opti_coach/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+Environment=PATH=%h/llm_opti_coach/.venv/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

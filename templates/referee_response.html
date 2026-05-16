@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Referee Verdict • LLM OptiCoach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <div class="max-w-3xl mx-auto px-6 py-10">
+        <a href="/" class="text-emerald-400 text-sm">← Back</a>
+        <h1 class="text-3xl font-semibold tracking-tight mt-6 mb-6">AI Referee Verdict</h1>
+        
+        <div class="mb-6 p-5 bg-zinc-900 border border-zinc-700 rounded-2xl">
+            <div class="text-xs uppercase tracking-widest text-zinc-500 mb-1">You proposed:</div>
+            <div class="font-mono text-sm text-emerald-300">{{ proposed_change }}</div>
+        </div>
+        
+        <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-8 prose prose-invert max-w-none">
+            {{ verdict | replace('\n', '<br>') | safe }}
+        </div>
+        
+        <div class="mt-8 flex gap-x-4">
+            <a href="/optimizations" class="flex-1 text-center py-4 border border-zinc-700 rounded-2xl hover:bg-zinc-900">Back to Optimizations</a>
+            <a href="/" class="flex-1 text-center py-4 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-white font-medium">Done</a>
+        </div>
+    </div>
+</body>
+</html>

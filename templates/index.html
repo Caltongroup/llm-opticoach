@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM OptiCoach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="bg-zinc-950 text-zinc-200 min-h-screen">
+    <div class="pointer-events-none fixed inset-0 overflow-hidden">
+        <div class="absolute -top-28 right-0 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl"></div>
+        <div class="absolute bottom-0 -left-16 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl"></div>
+    </div>
+
+    <div class="relative max-w-6xl mx-auto px-6 py-12">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
+            <div class="flex items-center gap-x-4">
+                <div class="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-[0_12px_30px_-12px_rgba(16,185,129,0.85)]">
+                    <i class="fa-solid fa-robot text-white text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-3xl md:text-4xl font-semibold tracking-tighter">LLM OptiCoach</h1>
+                    <p class="text-emerald-400 text-sm">Jetson performance guidance for local LLM serving</p>
+                </div>
+            </div>
+
+            <div class="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs font-medium text-emerald-300">
+                <i class="fa-solid fa-calendar-check"></i>
+                <span>7-day Jetson decision support tool</span>
+            </div>
+        </div>
+
+        <section class="mb-8 rounded-3xl border border-emerald-500/40 bg-emerald-500/5 p-8 md:p-10 shadow-[0_30px_80px_-40px_rgba(16,185,129,0.45)]">
+            <p class="text-xs uppercase tracking-[0.2em] text-emerald-400 mb-3">Welcome to Local AI Tuning</p>
+            <h2 class="text-3xl md:text-4xl font-semibold tracking-tight mb-4">New to Jetson? Start here.</h2>
+            <p class="text-zinc-300 text-lg max-w-3xl mb-6">We'll walk you through setting up two models that work together—a fast one to orchestrate, a powerful one for heavy lifting. No coding required.</p>
+            <a href="/onboard" class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-6 rounded-2xl transition-colors">
+                <i class="fa-solid fa-play"></i>
+                Start 3-Step Setup
+            </a>
+            <div class="mt-6 flex flex-wrap gap-3 text-sm">
+                <span class="px-3 py-1.5 rounded-full bg-zinc-950 border border-emerald-500/30 text-emerald-200">✓ Hardware check</span>
+                <span class="px-3 py-1.5 rounded-full bg-zinc-950 border border-emerald-500/30 text-emerald-200">✓ Model selection</span>
+                <span class="px-3 py-1.5 rounded-full bg-zinc-950 border border-emerald-500/30 text-emerald-200">✓ Baseline measurement</span>
+            </div>
+        </section>
+
+        <details class="mb-8 rounded-3xl border border-zinc-700 bg-zinc-900/50 p-6 group">
+            <summary class="cursor-pointer list-none flex items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold tracking-tight">Already familiar with tuning? Advanced workflow →</h3>
+                <span class="text-zinc-400 text-sm transition-transform group-open:rotate-180"><i class="fa-solid fa-chevron-down"></i></span>
+            </summary>
+            <div class="mt-4 text-sm text-zinc-400">
+                <p class="mb-3">Use the detailed diagnostic scan and coaching system for in-depth optimization.</p>
+            </div>
+        </details>
+
+        <details class="mb-8 rounded-3xl border border-zinc-700 bg-zinc-900/50 p-6 group">
+            <summary class="cursor-pointer list-none flex items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold tracking-tight">How It Works</h3>
+                <span class="text-zinc-400 text-sm transition-transform group-open:rotate-180"><i class="fa-solid fa-chevron-down"></i></span>
+            </summary>
+            <div class="mt-4 space-y-3 text-sm text-zinc-300">
+                <div>
+                    <p class="font-semibold text-emerald-300 mb-1">The Guided Setup (3 steps, 5 minutes)</p>
+                    <ol class="text-zinc-400 text-xs space-y-1 ml-4">
+                        <li>1. Check your Jetson is in max performance mode</li>
+                        <li>2. Pick a fast model and a smart model to work as a team</li>
+                        <li>3. Measure baseline—now you can tune and compare</li>
+                    </ol>
+                </div>
+                <div>
+                    <p class="font-semibold text-cyan-300 mb-1">The Advanced Workflow (for detailed debugging)</p>
+                    <ol class="text-zinc-400 text-xs space-y-1 ml-4">
+                        <li>1. Run a full diagnostic scan (power, memory, serving stack)</li>
+                        <li>2. Get AI coaching on what to fix</li>
+                        <li>3. Apply safe optimizations with AI referee validation</li>
+                    </ol>
+                </div>
+            </div>
+        </details>
+
+        <section class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <a href="/scan" class="group relative overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900 p-7 transition-all duration-300 hover:-translate-y-1 hover:border-cyan-400/50 hover:shadow-[0_20px_50px_-25px_rgba(34,211,238,0.55)]">
+                <div class="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-cyan-500/15 blur-2xl transition-opacity group-hover:opacity-100 opacity-70"></div>
+                <div class="relative">
+                    <div class="mb-5 h-11 w-11 rounded-xl bg-cyan-500/15 text-cyan-300 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-gauge-high"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold mb-2">Advanced: Full Diagnostic Scan</h3>
+                    <p class="text-sm text-zinc-400 leading-relaxed">Inspect power mode, clocks, memory, GPU status, and serving runtime. Get AI coaching and use the safety referee.</p>
+                    <div class="mt-5 text-cyan-300 text-sm font-medium inline-flex items-center gap-2">Advanced workflow <i class="fa-solid fa-arrow-right text-xs transition-transform group-hover:translate-x-1"></i></div>
+                </div>
+            </a>
+
+            <a href="/tune" class="group relative overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900 p-7 transition-all duration-300 hover:-translate-y-1 hover:border-yellow-400/50 hover:shadow-[0_20px_50px_-25px_rgba(251,191,36,0.5)]">
+                <div class="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-yellow-500/15 blur-2xl transition-opacity group-hover:opacity-100 opacity-70"></div>
+                <div class="relative">
+                    <div class="mb-5 h-11 w-11 rounded-xl bg-yellow-500/15 text-yellow-300 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-sliders"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold mb-2">Tuning Dashboard</h3>
+                    <p class="text-sm text-zinc-400 leading-relaxed">View your baseline, try optimizations, and measure the results. See what actually improves performance on your setup.</p>
+                    <div class="mt-5 text-yellow-300 text-sm font-medium inline-flex items-center gap-2">See your measurements <i class="fa-solid fa-arrow-right text-xs transition-transform group-hover:translate-x-1"></i></div>
+                </div>
+            </a>
+        </section>
+    </div>
+</body>
+</html>

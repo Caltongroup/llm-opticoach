@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tuning Dashboard • LLM OptiCoach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <div class="max-w-4xl mx-auto px-6 py-10">
+        <div class="mb-10">
+            <a href="/" class="text-emerald-400 hover:text-emerald-300 text-sm flex items-center gap-x-2 mb-4">
+                <i class="fa-solid fa-arrow-left"></i> Back to home
+            </a>
+            <h1 class="text-4xl font-semibold tracking-tight mb-2">Tuning Dashboard</h1>
+            <p class="text-lg text-zinc-400">Measure, tune, compare. Find what makes your models faster.</p>
+        </div>
+
+        <div class="mb-8 bg-zinc-900 border border-emerald-500/40 rounded-3xl p-6">
+            <h2 class="text-2xl font-semibold mb-4">Your Baseline</h2>
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="text-sm text-zinc-400">Fast Model ({{ baseline.fast_model }})</div>
+                    <div class="text-3xl font-semibold text-emerald-300 mt-2">{{ baseline.fast_tps }}</div>
+                    <div class="text-xs text-zinc-500">tokens/sec</div>
+                </div>
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="text-sm text-zinc-400">Smart Model ({{ baseline.smart_model }})</div>
+                    <div class="text-3xl font-semibold text-blue-300 mt-2">{{ baseline.smart_tps }}</div>
+                    <div class="text-xs text-zinc-500">tokens/sec</div>
+                </div>
+            </div>
+            <p class="text-sm text-zinc-400">Captured at {{ baseline.timestamp }}</p>
+        </div>
+
+        <div class="mb-8 bg-zinc-900 border border-cyan-500/40 rounded-3xl p-6">
+            <h2 class="text-2xl font-semibold mb-4">Easy Optimizations to Try</h2>
+            <p class="text-sm text-zinc-400 mb-6">
+                Click <strong>Step-by-step guide</strong> on any item to get exact instructions for your setup.
+                Try one at a time, then measure again to see if it helped.
+            </p>
+
+            <div class="space-y-4">
+                <!-- Clock Locking (Jetson only) -->
+                {% if is_jetson is not defined or is_jetson %}
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="flex items-start gap-4">
+                        <div class="text-2xl">📌</div>
+                        <div class="flex-1">
+                            <div class="font-semibold">Clock Locking</div>
+                            <div class="text-xs text-emerald-400 font-medium mb-1">Applies to: both models • 10–20% speed boost expected</div>
+                            <p class="text-sm text-zinc-400">Prevents the GPU and CPU from slowing down between requests. One-time command after every reboot.</p>
+                        </div>
+                        <a href="/tune/guide/clocks" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold whitespace-nowrap">
+                            Step-by-step guide
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Quantization -->
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="flex items-start gap-4">
+                        <div class="text-2xl">💾</div>
+                        <div class="flex-1">
+                            <div class="font-semibold">Switch Smart Model to a lighter quantization</div>
+                            <div class="text-xs text-blue-400 font-medium mb-1">Applies to: <strong>{{ baseline.smart_model }}</strong> (your heavy-lifting model) • 30–50% faster, small quality tradeoff</div>
+                            <p class="text-sm text-zinc-400">
+                                Your current smart model uses q5_K_M (good quality but heavier). Switching to q4_K_M uses less memory and responds faster — often with no noticeable quality change for coding tasks.
+                            </p>
+                        </div>
+                        <a href="/tune/guide/quantize" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold whitespace-nowrap">
+                            Step-by-step guide
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Parallel requests -->
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="flex items-start gap-4">
+                        <div class="text-2xl">⚡</div>
+                        <div class="flex-1">
+                            <div class="font-semibold">Allow Parallel Requests</div>
+                            <div class="text-xs text-cyan-400 font-medium mb-1">Applies to: both models • useful if you're building an app that makes multiple calls</div>
+                            <p class="text-sm text-zinc-400">By default Ollama handles one request at a time. Setting it to 2 lets your fast model answer a quick question while the smart model finishes a longer response.</p>
+                        </div>
+                        <a href="/tune/guide/parallel" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold whitespace-nowrap">
+                            Step-by-step guide
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-8 bg-zinc-900 border border-yellow-500/40 rounded-3xl p-6">
+            <h2 class="text-2xl font-semibold mb-4">Run Another Measurement</h2>
+            <p class="text-sm text-zinc-400 mb-6">
+                After you try an optimization (or change a model), measure again to see if it helped.
+            </p>
+            <form method="post" action="/measure-again" class="space-y-4">
+                <textarea name="what_changed" placeholder="What did you change? (optional)" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-yellow-500 h-20"></textarea>
+                <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 transition-colors text-white font-semibold py-3 rounded-2xl">
+                    Measure Now
+                </button>
+            </form>
+        </div>
+
+        <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-6">
+            <h2 class="text-2xl font-semibold mb-4">Your Measurement History</h2>
+            <div class="space-y-3">
+                {% if measurements %}
+                    {% for m in measurements %}
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-4 flex items-center justify-between">
+                        <div>
+                            <div class="font-semibold">{{ m.label }}</div>
+                            <div class="text-xs text-zinc-500">{{ m.timestamp }}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-lg font-semibold text-emerald-300">{{ m.fast_tps }} tok/s</div>
+                            <div class="text-xs text-zinc-500">Fast model</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-6 text-zinc-400">
+                        <p>No additional measurements yet. Run the measurement above to see your progress.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

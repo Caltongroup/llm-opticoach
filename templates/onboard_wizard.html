@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local AI Setup • LLM OptiCoach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <div class="max-w-3xl mx-auto px-6 py-10">
+        <div class="mb-10">
+            <h1 class="text-4xl font-semibold tracking-tight mb-2">Local AI Setup</h1>
+            <p class="text-lg text-zinc-400">Get your NVIDIA hardware ready for fast, local AI coding assistance</p>
+        </div>
+
+        {% if step == 1 %}
+        <div class="space-y-6">
+            <div class="bg-zinc-900 border border-emerald-500/40 rounded-3xl p-8">
+                <div class="text-sm uppercase tracking-widest text-emerald-400 mb-2">Step 1 of 3</div>
+                <h2 class="text-2xl font-semibold mb-2">Let's check your hardware</h2>
+                {% if hardware.platform_name is defined %}
+                <div class="inline-flex items-center gap-2 bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-1.5 text-sm mb-4">
+                    <i class="fa-solid fa-microchip text-emerald-400"></i>
+                    <span class="font-medium">{{ hardware.platform_name }}</span>
+                    {% if hardware.model_budget_gb is defined %}
+                    <span class="text-zinc-500">• ~{{ hardware.model_budget_gb }} GB available for models</span>
+                    {% endif %}
+                </div>
+                {% endif %}
+                <p class="text-zinc-300 mb-6">We just need to make sure your hardware is configured for full speed.</p>
+
+                <div class="space-y-4 mb-8">
+                    {% if hardware.is_jetson %}
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
+                        <div class="text-3xl {% if hardware.maxn_ok %}text-emerald-400{% else %}text-amber-400{% endif %}">
+                            {% if hardware.maxn_ok %}<i class="fa-solid fa-check-circle"></i>{% else %}<i class="fa-solid fa-exclamation-circle"></i>{% endif %}
+                        </div>
+                        <div>
+                            <div class="font-semibold">Power Mode</div>
+                            <div class="text-sm text-zinc-400">
+                                {% if hardware.maxn_ok %}
+                                ✓ MAXN mode enabled - your device is running at full power
+                                {% else %}
+                                Not in MAXN mode - let's fix this first
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
+                        <div class="text-3xl {% if hardware.ram_pct is defined and hardware.ram_pct > 90 %}text-red-400{% elif hardware.ram_pct is defined and hardware.ram_pct > 75 %}text-amber-400{% else %}text-emerald-400{% endif %}">
+                            {% if hardware.ram_pct is defined and hardware.ram_pct > 90 %}<i class="fa-solid fa-exclamation-circle"></i>
+                            {% elif hardware.ram_pct is defined and hardware.ram_pct > 75 %}<i class="fa-solid fa-exclamation-circle"></i>
+                            {% else %}<i class="fa-solid fa-check-circle"></i>{% endif %}
+                        </div>
+                        <div class="flex-1">
+                            <div class="font-semibold">Memory</div>
+                            {% if hardware.ram_used_gb is defined %}
+                            <div class="text-sm text-zinc-400">{{ hardware.ram_used_gb }} GB used of {{ hardware.ram_total_gb }} GB ({{ hardware.ram_pct }}%)</div>
+                            <div class="w-full bg-zinc-800 rounded-full h-2 mt-2">
+                                <div class="h-2 rounded-full {% if hardware.ram_pct > 90 %}bg-red-500{% elif hardware.ram_pct > 75 %}bg-amber-500{% else %}bg-emerald-500{% endif %}" style="width: {{ hardware.ram_pct }}%"></div>
+                            </div>
+                            {% if hardware.swap_used_mb is defined and hardware.swap_used_mb > 500 %}
+                            <div class="text-xs text-amber-400 mt-1">⚠ Swap in use: {{ hardware.swap_used_mb }} MB — this slows things down</div>
+                            {% elif hardware.swap_used_mb is defined %}
+                            <div class="text-xs text-zinc-500 mt-1">Swap: {{ hardware.swap_used_mb }} MB used of {{ hardware.swap_total_gb }} GB (healthy)</div>
+                            {% endif %}
+                            {% else %}
+                            <div class="text-sm text-zinc-400">64GB unified memory</div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
+                        <div class="text-3xl text-emerald-400"><i class="fa-solid fa-check-circle"></i></div>
+                        <div class="flex-1">
+                            <div class="font-semibold">GPU</div>
+                            {% if hardware.gpu_load_pct is defined %}
+                            <div class="text-sm text-zinc-400">Load: {{ hardware.gpu_load_pct }}% — {% if hardware.gpu_load_pct == 0 %}idle (no model running){% elif hardware.gpu_load_pct < 30 %}light use{% elif hardware.gpu_load_pct < 80 %}working{% else %}heavy load{% endif %}</div>
+                            {% else %}
+                            <div class="text-sm text-zinc-400">GPU ready</div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
+                        <div class="text-3xl text-emerald-400"><i class="fa-solid fa-check-circle"></i></div>
+                        <div class="flex-1">
+                            <div class="font-semibold">CPU</div>
+                            {% if hardware.cpu_cores is defined %}
+                            <div class="text-sm text-zinc-400">{{ hardware.cpu_cores }} cores @ {{ hardware.cpu_freq_mhz }} MHz — avg load {{ hardware.cpu_avg_pct }}%</div>
+                            {% else %}
+                            <div class="text-sm text-zinc-400">CPU info not available</div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
+                        <div class="text-3xl {% if hardware.temp_max is defined and hardware.temp_max > 80 %}text-red-400{% elif hardware.temp_max is defined and hardware.temp_max > 65 %}text-amber-400{% else %}text-emerald-400{% endif %}">
+                            {% if hardware.temp_max is defined and hardware.temp_max > 80 %}<i class="fa-solid fa-temperature-full"></i>
+                            {% elif hardware.temp_max is defined and hardware.temp_max > 65 %}<i class="fa-solid fa-temperature-half"></i>
+                            {% else %}<i class="fa-solid fa-temperature-low"></i>{% endif %}
+                        </div>
+                        <div class="flex-1">
+                            <div class="font-semibold">Temperature</div>
+                            {% if hardware.temp_max is defined %}
+                            <div class="text-sm text-zinc-400">Hottest: {{ hardware.temp_max }}°C ({{ hardware.temp_max_name }}) — {% if hardware.temp_max > 80 %}too hot, throttling likely{% elif hardware.temp_max > 65 %}warm, keep an eye on it{% else %}cool, no worries{% endif %}</div>
+                            {% if hardware.thermals is defined %}
+                            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 mt-1">
+                                {% for name, temp in hardware.thermals.items() %}
+                                <span>{{ name }}: {{ temp }}°C</span>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            {% else %}
+                            <div class="text-sm text-zinc-400">Thermal data not available</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                {% if hardware.is_jetson and not hardware.maxn_ok %}
+                <div class="bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4 mb-6">
+                    <div class="font-semibold text-amber-300 mb-2">Fix: Enable maximum performance</div>
+                    <div class="font-mono text-sm bg-black/40 p-3 rounded mb-3 text-emerald-300">
+                        sudo nvpmodel -m 0 && sudo jetson_clocks
+                    </div>
+                    <p class="text-sm text-zinc-300">Run this command in a terminal, wait 10 seconds, then come back and refresh this page.</p>
+                </div>
+                {% endif %}
+
+                <form method="post" action="/onboard/models">
+                    <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 transition-colors text-white font-semibold py-4 rounded-2xl">
+                        {% if hardware.is_jetson and not hardware.maxn_ok %}
+                        Run the command above, then refresh and try again
+                        {% else %}
+                        Hardware ready - pick models →
+                        {% endif %}
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {% elif step == 2 %}
+        <div class="space-y-6">
+            <div class="bg-zinc-900 border border-cyan-500/40 rounded-3xl p-8">
+                <div class="text-sm uppercase tracking-widest text-cyan-400 mb-2">Step 2 of 3</div>
+                <h2 class="text-2xl font-semibold mb-4">Pick your AI models</h2>                {% if platform is defined %}
+                <div class="inline-flex items-center gap-2 bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-1.5 text-sm mb-4">
+                    <i class="fa-solid fa-microchip text-cyan-400"></i>
+                    <span class="font-medium">{{ platform.display_name }}</span>
+                    <span class="text-zinc-500">• ~{{ recs.budget_gb }} GB model budget</span>
+                </div>
+                {% endif %}                <p class="text-zinc-300 mb-6">
+                    You need two models working as a team. <strong>Archer</strong> (your fast agent) handles quick conversations,
+                    uses tools, and knows when a task is too big for it. When that happens, it hands off to the
+                    <strong>heavy lifter</strong> for deep coding and research.
+                </p>
+
+                {% if suggest_fast or suggest_smart %}
+                <div class="bg-blue-500/10 border border-blue-500/40 rounded-2xl p-5 mb-6">
+                    <div class="font-semibold text-blue-300 mb-2"><i class="fa-solid fa-download mr-2"></i>Better models available</div>
+                    <p class="text-sm text-zinc-400 mb-4">We checked your installed models and found better options for your use case. You can download them now or continue with what you have.</p>
+
+                    {% if suggest_fast %}
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-4 mb-3">
+                        <div class="flex items-start justify-between gap-4">
+                            <div>
+                                <div class="font-semibold text-emerald-300">{{ suggest_fast.name }} <span class="text-xs text-zinc-500">({{ suggest_fast.size_gb }} GB)</span></div>
+                                <div class="text-xs text-zinc-500 mb-1">Ideal for: Archer / Orchestrator</div>
+                                <p class="text-sm text-zinc-400">{{ suggest_fast.why }}</p>
+                            </div>
+                        </div>
+                        <div class="font-mono text-xs bg-black/40 p-2 rounded mt-3 text-emerald-300 flex items-center justify-between">
+                            <span>{{ suggest_fast.pull_cmd }}</span>
+                            <button onclick="navigator.clipboard.writeText('{{ suggest_fast.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-500 hover:text-white text-xs px-2 py-1 border border-zinc-700 rounded-lg ml-3">Copy</button>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if suggest_smart %}
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+                        <div class="flex items-start justify-between gap-4">
+                            <div>
+                                <div class="font-semibold text-blue-300">{{ suggest_smart.name }} <span class="text-xs text-zinc-500">({{ suggest_smart.size_gb }} GB)</span></div>
+                                <div class="text-xs text-zinc-500 mb-1">Ideal for: Heavy Lifter / Deep Coding</div>
+                                <p class="text-sm text-zinc-400">{{ suggest_smart.why }}</p>
+                            </div>
+                        </div>
+                        <div class="font-mono text-xs bg-black/40 p-2 rounded mt-3 text-emerald-300 flex items-center justify-between">
+                            <span>{{ suggest_smart.pull_cmd }}</span>
+                            <button onclick="navigator.clipboard.writeText('{{ suggest_smart.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-500 hover:text-white text-xs px-2 py-1 border border-zinc-700 rounded-lg ml-3">Copy</button>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <p class="text-xs text-zinc-500 mt-3">Run the pull commands in a terminal, wait for the download to finish, then refresh this page. The new models will appear in the dropdowns below.</p>
+                </div>
+                {% endif %}
+
+                <form method="post" action="/onboard/benchmark" class="space-y-6">
+                    <div class="border border-emerald-500/40 bg-emerald-500/5 rounded-2xl p-6">
+                        <div class="flex items-center gap-2 mb-1">
+                            <i class="fa-solid fa-bolt text-emerald-400 text-xl"></i>
+                            <h3 class="text-lg font-semibold">Archer — Fast Agent (Orchestrator)</h3>
+                        </div>
+                        <p class="text-sm text-zinc-400 mb-4">
+                            Your daily driver. Handles conversations, uses tools (like Hermes), and decides
+                            when a task needs the heavy model. Needs to be <strong>fast</strong> and good at
+                            <strong>tool calling</strong>.
+                        </p>
+                        
+                        <select name="fast_model" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-zinc-100 focus:outline-none focus:border-emerald-500 mb-3">
+                            {% for model in available_models %}
+                            <option value="{{ model }}" {% if model == default_fast_model %}selected{% endif %}>
+                                {{ model }}{% if model_sizes and model_sizes[model] is defined %} — {{ model_sizes[model] }} GB{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <p class="text-xs text-zinc-500">
+                            <strong>Selected: {{ default_fast_model }}</strong> —
+                            {% if 'hermes' in default_fast_model|lower %}
+                            Purpose-built for tool calling and agent personality. Ideal choice.
+                            {% elif 'qwen3' in default_fast_model|lower %}
+                            Good native tool calling support. Solid orchestrator.
+                            {% else %}
+                            Workable, but consider downloading hermes3:8b for better tool calling.
+                            {% endif %}
+                        </p>
+                    </div>
+
+                    <div class="border border-blue-500/40 bg-blue-500/5 rounded-2xl p-6">
+                        <div class="flex items-center gap-2 mb-1">
+                            <i class="fa-solid fa-brain text-blue-400 text-xl"></i>
+                            <h3 class="text-lg font-semibold">Heavy Lifter — Deep Coding &amp; Research</h3>
+                        </div>
+                        <p class="text-sm text-zinc-400 mb-4">
+                            Called by Archer when the task needs real muscle: multi-file refactors,
+                            complex debugging, deep research. Slower but much smarter.
+                            Best if it's <strong>code-trained</strong> with <strong>large parameter count</strong>.
+                        </p>
+                        
+                        <select name="smart_model" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-zinc-100 focus:outline-none focus:border-blue-500 mb-3">
+                            {% for model in available_models %}
+                            <option value="{{ model }}" {% if model == default_smart_model %}selected{% endif %}>
+                                {{ model }}{% if model_sizes and model_sizes[model] is defined %} — {{ model_sizes[model] }} GB{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <p class="text-xs text-zinc-500">
+                            <strong>Selected: {{ default_smart_model }}</strong> —
+                            {% if 'coder' in default_smart_model|lower %}
+                            Code-trained model. Great for vibe coding tasks.
+                            {% elif '27b' in default_smart_model or '30b' in default_smart_model or '32b' in default_smart_model or '35b' in default_smart_model %}
+                            Large model with strong reasoning. Good choice for heavy lifting.
+                            {% else %}
+                            Usable, but a 27B+ code-trained model would handle complex tasks better.
+                            {% endif %}
+                        </p>
+                    </div>
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <div class="text-sm text-zinc-400">
+                            <i class="fa-solid fa-memory text-zinc-500 mr-2"></i>
+                            <strong>Memory estimate:</strong>
+                            {% if recs is defined %}
+                            ~{{ recs.combined_gb }} GB for both models
+                            out of ~{{ recs.budget_gb }} GB budget —
+                            {% if recs.both_fit %}
+                            <span class="text-emerald-400">plenty of headroom, no thrashing risk</span>
+                            {% else %}
+                            <span class="text-amber-400">tight fit — watch for swap usage</span>
+                            {% endif %}
+                            {% else %}
+                            check selections above
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if recs is defined and recs.warning %}
+                    <div class="bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4">
+                        <div class="flex gap-3">
+                            <i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5"></i>
+                            <p class="text-sm text-amber-200">{{ recs.warning }}</p>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 transition-colors text-white font-semibold py-4 rounded-2xl">
+                        Models ready — measure performance →
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {% elif step == 3 %}
+        <div class="space-y-6">
+            <div class="bg-zinc-900 border border-cyan-500/40 rounded-3xl p-8">
+                <div class="text-sm uppercase tracking-widest text-cyan-400 mb-2">Step 3 of 3</div>
+                <h2 class="text-2xl font-semibold mb-4">Measure baseline performance</h2>
+                <p class="text-zinc-300 mb-6">
+                    We'll run your models a few times to see how fast they respond. This is your starting point.
+                    Later, we'll tune settings and measure again to see what actually helps.
+                </p>
+
+                <form method="post" action="/measure-baseline" class="space-y-4">
+                    <input type="hidden" name="fast_model" value="{{ fast_model }}">
+                    <input type="hidden" name="smart_model" value="{{ smart_model }}">
+                    
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <p class="text-sm text-zinc-400 mb-2"><strong>Fast model:</strong> {{ fast_model }}</p>
+                        <p class="text-sm text-zinc-400 mb-2"><strong>Smart model:</strong> {{ smart_model }}</p>
+                    </div>
+
+                    <div class="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4">
+                        <p class="text-sm text-blue-200">
+                            <i class="fa-solid fa-info-circle mr-2"></i>
+                            This will take 30-60 seconds. Keep this page open.
+                        </p>
+                    </div>
+
+                    <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-500 transition-colors text-white font-semibold py-4 rounded-2xl">
+                        Start measuring (takes ~1 minute)
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {% elif step == 'results' %}
+        <div class="space-y-6">
+            <div class="bg-zinc-900 border border-emerald-500/40 rounded-3xl p-8">
+                <div class="text-sm uppercase tracking-widest text-emerald-400 mb-2">Setup Complete</div>
+                <h2 class="text-2xl font-semibold mb-4">Your baseline is ready</h2>
+                <p class="text-zinc-300 mb-6">
+                    We've measured your models. Now you can start tuning and comparing results.
+                </p>
+
+                <div class="space-y-4 mb-8">
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <div class="text-sm text-zinc-400 mb-1">Fast Model Response</div>
+                        <div class="text-2xl font-semibold text-emerald-300">{{ baseline.fast_ttft }}s</div>
+                        <div class="text-xs text-zinc-500">first token time</div>
+                    </div>
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <div class="text-sm text-zinc-400 mb-1">Fast Model Speed</div>
+                        <div class="text-2xl font-semibold text-emerald-300">{{ baseline.fast_tps }} tok/s</div>
+                        <div class="text-xs text-zinc-500">tokens per second</div>
+                    </div>
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <div class="text-sm text-zinc-400 mb-1">Smart Model Response</div>
+                        <div class="text-2xl font-semibold text-blue-300">{{ baseline.smart_ttft }}s</div>
+                        <div class="text-xs text-zinc-500">first token time</div>
+                    </div>
+
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                        <div class="text-sm text-zinc-400 mb-1">Smart Model Speed</div>
+                        <div class="text-2xl font-semibold text-blue-300">{{ baseline.smart_tps }} tok/s</div>
+                        <div class="text-xs text-zinc-500">tokens per second</div>
+                    </div>
+                </div>
+
+                <a href="/tune" class="block w-full text-center bg-emerald-600 hover:bg-emerald-500 transition-colors text-white font-semibold py-4 rounded-2xl">
+                    Go to Tuning Dashboard
+                </a>
+
+                <a href="/" class="block w-full text-center mt-3 border border-zinc-700 hover:bg-zinc-900 text-white font-semibold py-4 rounded-2xl">
+                    Back to Home
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="mt-10 text-center text-xs text-zinc-500">
+            <p>Need help? All the tech details are saved. You can always go deeper if you want.</p>
+        </div>
+    </div>
+</body>
+</html>
