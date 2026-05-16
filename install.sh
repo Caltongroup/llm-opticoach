@@ -3,7 +3,7 @@
 # LLM OptiCoach — one-liner installer for NVIDIA Jetson & DGX Spark
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/YOUR_USER/llm-opticoach/main/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/Caltongroup/llm-opticoach/main/install.sh | bash
 #
 # What it does:
 #   1. Checks Python 3.10+ is available
@@ -15,7 +15,7 @@
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-REPO_URL="https://github.com/YOUR_USER/llm-opticoach.git"
+REPO_URL="https://github.com/Caltongroup/llm-opticoach.git"
 INSTALL_DIR="$HOME/llm_opti_coach"
 SERVICE_NAME="opticoach"
 PORT=8080

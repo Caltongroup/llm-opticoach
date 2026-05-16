@@ -22,7 +22,7 @@ OptiCoach auto-detects your device, recommends models that fit your memory, and 
 ## Install (one command)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_USER/llm-opticoach/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Caltongroup/llm-opticoach/main/install.sh | bash
 ```
 
 This will:
@@ -36,7 +36,7 @@ This will:
 ### Manual install
 
 ```bash
-git clone https://github.com/YOUR_USER/llm-opticoach.git ~/llm_opti_coach
+git clone https://github.com/Caltongroup/llm-opticoach.git ~/llm_opti_coach
 cd ~/llm_opti_coach
 python3 -m venv .venv
 source .venv/bin/activate
