@@ -1,9 +1,11 @@
 """LLM OptiCoach web app routes and session-scoped orchestration."""
 
+import json
 import os
 import re
 import secrets
 import subprocess
+import time
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -673,66 +675,67 @@ async def onboard_benchmark(
     )
 
 
+def _measure_model_via_api(model_name: str, prompt: str = "Write a hello world function in Python.") -> Dict[str, Any]:
+    """Measure a model using the Ollama HTTP API for accurate timing."""
+    import urllib.request
+    try:
+        payload = json.dumps({"model": model_name, "prompt": prompt, "stream": False}).encode()
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            data = json.loads(resp.read())
+
+        eval_count = data.get("eval_count", 0)
+        eval_dur_ns = data.get("eval_duration", 0)
+        prompt_dur_ns = data.get("prompt_eval_duration", 0)
+
+        tps = round(eval_count / (eval_dur_ns / 1e9), 1) if eval_dur_ns else 0
+        ttft = round(prompt_dur_ns / 1e9, 2) if prompt_dur_ns else 0
+
+        return {"success": True, "ttft": ttft, "tps": tps, "model": model_name}
+    except Exception:
+        return {"success": False, "ttft": None, "tps": None, "model": model_name}
+
+
+def _safe_tps(result: Dict[str, Any]) -> str:
+    """Return tps value or '—' for display."""
+    v = result.get("tps")
+    return str(v) if v is not None else "—"
+
+
+def _safe_ttft(result: Dict[str, Any]) -> str:
+    v = result.get("ttft")
+    return str(v) if v is not None else "—"
+
+
 @app.post("/measure-baseline", response_class=HTMLResponse)
 async def measure_baseline(
     request: Request,
     fast_model: str = Form(...),
     smart_model: str = Form(...),
 ):
-    """Run baseline measurements on both models."""
-    
-    def measure_model(model_name: str) -> Dict[str, Any]:
-        """Quick measurement of a model using Ollama."""
-        try:
-            prompt = "Write a hello world function in Python."
-            result = subprocess.run(
-                ["ollama", "run", model_name, prompt],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            
-            if result.returncode != 0:
-                return {"success": False, "ttft": None, "tps": None}
-            
-            # Simple estimation: tokens/sec based on response length
-            output = result.stdout
-            estimated_tokens = len(output.split()) 
-            # Average ~4 chars per token
-            response_tokens = len(output) / 4
-            
-            # Estimate TTFT (first token time) - typically ~1s for first token
-            ttft = 1.0
-            tps = response_tokens / 2  # Rough estimate: 2 second total
-            
-            return {
-                "success": True,
-                "ttft": round(ttft, 2),
-                "tps": round(tps, 1),
-                "model": model_name,
-            }
-        except Exception as e:
-            return {"success": False, "ttft": None, "tps": None, "model": model_name}
-    
+    """Run baseline measurements on both models via Ollama API."""
     state = get_session_state(request)
-    
-    # Measure both models
-    fast_result = measure_model(fast_model)
-    smart_result = measure_model(smart_model)
-    
+
+    fast_result = _measure_model_via_api(fast_model)
+    smart_result = _measure_model_via_api(smart_model) if smart_model != fast_model else fast_result
+
     baseline = {
         "fast_model": fast_model,
         "smart_model": smart_model,
-        "fast_ttft": fast_result.get("ttft", "?"),
-        "fast_tps": fast_result.get("tps", "?"),
-        "smart_ttft": smart_result.get("ttft", "?"),
-        "smart_tps": smart_result.get("tps", "?"),
+        "fast_ttft": _safe_ttft(fast_result),
+        "fast_tps": _safe_tps(fast_result),
+        "smart_ttft": _safe_ttft(smart_result),
+        "smart_tps": _safe_tps(smart_result),
         "timestamp": str(__import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     }
-    
+
     state["wizard_baseline"] = baseline
     state["wizard_measurements"] = [{"label": "Baseline", **baseline}]
-    
+
     return templates.TemplateResponse(
         request=request,
         name="onboard_wizard.html",
@@ -768,6 +771,29 @@ async def tune_dashboard(request: Request):
     )
 
 
+@app.post("/pull-model")
+async def pull_model(request: Request, model: str = Form(...)):
+    """Pull/download a model via Ollama API. Returns JSON progress."""
+    import urllib.request
+
+    # Validate model name: only allow alphanumeric, colons, dots, hyphens, underscores, slashes
+    if not re.match(r'^[a-zA-Z0-9._:/-]+$', model):
+        return {"status": "error", "message": "Invalid model name"}
+
+    try:
+        payload = json.dumps({"name": model, "stream": False}).encode()
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/pull",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            data = json.loads(resp.read())
+        return {"status": "ok", "message": f"Successfully pulled {model}", "detail": data.get("status", "")}
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to pull {model}: {e}"}
+
+
 @app.post("/measure-again", response_class=HTMLResponse)
 async def measure_again(request: Request, what_changed: str = Form("")):
     """Run another measurement after an optimization."""
@@ -777,45 +803,22 @@ async def measure_again(request: Request, what_changed: str = Form("")):
     if not baseline:
         return render_error(request, "No baseline found", status_code=400)
     
-    # Re-measure both models
-    
-    def measure_model(model_name: str) -> Dict[str, Any]:
-        try:
-            prompt = "Explain what quantum computing is in one sentence."
-            result = subprocess.run(
-                ["ollama", "run", model_name, prompt],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            
-            if result.returncode != 0:
-                return {"success": False, "ttft": None, "tps": None}
-            
-            output = result.stdout
-            response_tokens = len(output) / 4
-            ttft = 1.0
-            tps = response_tokens / 2
-            
-            return {
-                "success": True,
-                "ttft": round(ttft, 2),
-                "tps": round(tps, 1),
-            }
-        except Exception:
-            return {"success": False, "ttft": None, "tps": None}
-    
-    fast_result = measure_model(baseline["fast_model"])
-    smart_result = measure_model(baseline["smart_model"])
-    
+    # Re-measure using Ollama API
+    fast_result = _measure_model_via_api(baseline["fast_model"], "Explain what quantum computing is in one sentence.")
+    smart_result = (
+        _measure_model_via_api(baseline["smart_model"], "Explain what quantum computing is in one sentence.")
+        if baseline["smart_model"] != baseline["fast_model"]
+        else fast_result
+    )
+
     new_measurement = {
         "label": what_changed or f"Measurement #{len(state.get('wizard_measurements', []))}",
         "fast_model": baseline["fast_model"],
         "smart_model": baseline["smart_model"],
-        "fast_ttft": fast_result.get("ttft", "?"),
-        "fast_tps": fast_result.get("tps", "?"),
-        "smart_ttft": smart_result.get("ttft", "?"),
-        "smart_tps": smart_result.get("tps", "?"),
+        "fast_ttft": _safe_ttft(fast_result),
+        "fast_tps": _safe_tps(fast_result),
+        "smart_ttft": _safe_ttft(smart_result),
+        "smart_tps": _safe_tps(smart_result),
         "timestamp": str(__import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     }
     

@@ -324,11 +324,16 @@
                 <div class="bg-blue-500/10 border border-blue-500/40 rounded-2xl p-5 mb-6">
                     <div class="font-semibold text-blue-300 mb-2"><i class="fa-solid fa-download mr-2"></i>Recommended model</div>
                     <p class="text-sm text-zinc-400 mb-3">{{ solo_rec.suggest_download.why }}</p>
-                    <div class="font-mono text-xs bg-black/40 p-2 rounded text-emerald-300 flex items-center justify-between">
+                    <div class="font-mono text-xs bg-black/40 p-2 rounded text-emerald-300 mb-3">
                         <span>{{ solo_rec.suggest_download.pull_cmd }}</span>
-                        <button onclick="navigator.clipboard.writeText('{{ solo_rec.suggest_download.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-500 hover:text-white text-xs px-2 py-1 border border-zinc-700 rounded-lg ml-3">Copy</button>
                     </div>
-                    <p class="text-xs text-zinc-500 mt-2">Run this in a terminal, wait for download, then refresh this page.</p>
+                    <div class="flex gap-2">
+                        <button onclick="pullModel('{{ solo_rec.suggest_download.model_tag }}', this)" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors">
+                            <i class="fa-solid fa-download mr-2"></i>Download now
+                        </button>
+                        <button onclick="navigator.clipboard.writeText('{{ solo_rec.suggest_download.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-400 hover:text-white text-xs px-3 py-2 border border-zinc-700 rounded-xl">Copy</button>
+                    </div>
+                    <div id="pull-status-solo" class="hidden mt-3 text-sm rounded-xl p-3"></div>
                 </div>
                 {% endif %}
 
@@ -406,10 +411,16 @@
                             <strong>{% if framework %}{{ framework.fast_label }}{% else %}Quick Responder{% endif %}</strong>
                         </div>
                         <p class="text-sm text-zinc-400">{{ suggest_fast.why }}</p>
-                        <div class="font-mono text-xs bg-black/40 p-2 rounded mt-3 text-emerald-300 flex items-center justify-between">
+                        <div class="font-mono text-xs bg-black/40 p-2 rounded mt-3 text-emerald-300 mb-2">
                             <span>{{ suggest_fast.pull_cmd }}</span>
-                            <button onclick="navigator.clipboard.writeText('{{ suggest_fast.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-500 hover:text-white text-xs px-2 py-1 border border-zinc-700 rounded-lg ml-3">Copy</button>
                         </div>
+                        <div class="flex gap-2">
+                            <button onclick="pullModel('{{ suggest_fast.model_tag }}', this)" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-2 rounded-xl transition-colors">
+                                <i class="fa-solid fa-download mr-2"></i>Download
+                            </button>
+                            <button onclick="navigator.clipboard.writeText('{{ suggest_fast.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-400 hover:text-white text-xs px-3 py-2 border border-zinc-700 rounded-xl">Copy</button>
+                        </div>
+                        <div id="pull-status-fast" class="hidden mt-2 text-sm rounded-xl p-3"></div>
                     </div>
                     {% endif %}
 
@@ -420,14 +431,20 @@
                             <strong>{% if framework %}{{ framework.heavy_label }}{% else %}Deep Thinker{% endif %}</strong>
                         </div>
                         <p class="text-sm text-zinc-400">{{ suggest_smart.why }}</p>
-                        <div class="font-mono text-xs bg-black/40 p-2 rounded mt-3 text-emerald-300 flex items-center justify-between">
+                        <div class="font-mono text-xs bg-black/40 p-2 rounded mt-3 text-emerald-300 mb-2">
                             <span>{{ suggest_smart.pull_cmd }}</span>
-                            <button onclick="navigator.clipboard.writeText('{{ suggest_smart.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-500 hover:text-white text-xs px-2 py-1 border border-zinc-700 rounded-lg ml-3">Copy</button>
                         </div>
+                        <div class="flex gap-2">
+                            <button onclick="pullModel('{{ suggest_smart.model_tag }}', this)" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold py-2 rounded-xl transition-colors">
+                                <i class="fa-solid fa-download mr-2"></i>Download
+                            </button>
+                            <button onclick="navigator.clipboard.writeText('{{ suggest_smart.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-400 hover:text-white text-xs px-3 py-2 border border-zinc-700 rounded-xl">Copy</button>
+                        </div>
+                        <div id="pull-status-smart" class="hidden mt-2 text-sm rounded-xl p-3"></div>
                     </div>
                     {% endif %}
 
-                    <p class="text-xs text-zinc-500 mt-3">Run the commands in a terminal, wait for download, then refresh this page.</p>
+                    <p class="text-xs text-zinc-500 mt-3">Downloads go through Ollama. Large models may take a few minutes.</p>
                 </div>
                 {% endif %}
 
@@ -622,5 +639,42 @@
             <p>Need help? All the tech details are saved. You can always go deeper.</p>
         </div>
     </div>
+
+<script>
+async function pullModel(modelName, btn) {
+    const origHTML = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Downloading…';
+    btn.classList.add('opacity-70');
+
+    try {
+        const resp = await fetch('/pull-model', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'model=' + encodeURIComponent(modelName)
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i>Downloaded!';
+            btn.classList.remove('opacity-70');
+            btn.classList.add('bg-emerald-700');
+            // Auto-refresh after 2s so the model appears in the dropdown
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            btn.innerHTML = '<i class="fa-solid fa-xmark mr-2"></i>Failed';
+            btn.classList.remove('opacity-70');
+            btn.classList.add('bg-red-700');
+            console.error('Pull failed:', data.message);
+            setTimeout(() => { btn.innerHTML = origHTML; btn.disabled = false; btn.classList.remove('bg-red-700'); }, 4000);
+        }
+    } catch (err) {
+        btn.innerHTML = '<i class="fa-solid fa-xmark mr-2"></i>Error';
+        btn.classList.remove('opacity-70');
+        btn.classList.add('bg-red-700');
+        console.error('Pull error:', err);
+        setTimeout(() => { btn.innerHTML = origHTML; btn.disabled = false; btn.classList.remove('bg-red-700'); }, 4000);
+    }
+}
+</script>
 </body>
 </html>

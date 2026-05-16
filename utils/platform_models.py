@@ -397,6 +397,7 @@ def get_model_recommendations(
                 "name": role_spec["ideal"],
                 "size_gb": role_spec["size_gb"],
                 "pull_cmd": role_spec["pull"],
+                "model_tag": role_spec["pull"].split()[-1],
                 "why": role_spec["why"],
             }
 
@@ -585,6 +586,7 @@ def get_solo_recommendation(
             "name": tier["ideal"],
             "size_gb": tier["size_gb"],
             "pull_cmd": tier["pull"],
+            "model_tag": tier["pull"].split()[-1],
             "why": tier["why"],
         }
 
