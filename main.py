@@ -23,7 +23,7 @@ from utils.llm_coach import (
     run_routing_assertion,
 )
 from utils.diagnostics import benchmark_snapshot
-from utils.platform_models import detect_platform, get_model_recommendations
+from utils.platform_models import detect_platform, get_model_recommendations, get_solo_recommendation
 
 app = FastAPI(title="LLM OptiCoach")
 templates = Jinja2Templates(directory="templates")
@@ -526,54 +526,149 @@ async def onboard_step1(request: Request):
     )
 
 
-@app.post("/onboard/models", response_class=HTMLResponse)
-async def onboard_step2(request: Request):
-    """Step 2: Model selection — platform-aware, role-based."""
-    state = get_session_state(request)
+# ── Agent framework metadata ────────────────────────────────────────
+_FRAMEWORKS = {
+    "hermes": {
+        "name": "Hermes / OpenClaw",
+        "icon": "fa-solid fa-wand-magic-sparkles",
+        "tip": (
+            "Hermes works best with <strong>hermes3:8b</strong> as the tool-calling agent. "
+            "It's purpose-built for structured function calls and agent personality."
+        ),
+        "fast_label": "Tool-Calling Agent",
+        "heavy_label": "Reasoning Model",
+    },
+    "openwebui": {
+        "name": "Open WebUI",
+        "icon": "fa-solid fa-globe",
+        "tip": (
+            "Open WebUI supports function calling with most models. "
+            "Any Qwen or Hermes model works well as the primary."
+        ),
+        "fast_label": "Primary Model",
+        "heavy_label": "Secondary Model",
+    },
+    "langchain": {
+        "name": "LangChain / LangGraph / CrewAI",
+        "icon": "fa-solid fa-link",
+        "tip": (
+            "LangChain agents need reliable tool calling. "
+            "Models with native function-call support (Qwen, Hermes) work best."
+        ),
+        "fast_label": "Agent Model",
+        "heavy_label": "Reasoning Model",
+    },
+    "other": {
+        "name": "Other / Custom",
+        "icon": "fa-solid fa-code",
+        "tip": (
+            "Pick the best fast model for quick tasks and the best "
+            "large model for complex reasoning. Any Ollama model works."
+        ),
+        "fast_label": "Fast Model",
+        "heavy_label": "Deep Model",
+    },
+}
 
-    # Get platform info (cached from step 1, or detect fresh)
+
+@app.post("/onboard/mode", response_class=HTMLResponse)
+async def onboard_mode(request: Request):
+    """Step 2: Choose how you want to use local AI."""
+    state = get_session_state(request)
+    plat = state.get("platform_info") or detect_platform()
+    return templates.TemplateResponse(
+        request=request,
+        name="onboard_wizard.html",
+        context={
+            "request": request,
+            "step": "mode",
+            "platform": plat,
+        },
+    )
+
+
+@app.post("/onboard/models", response_class=HTMLResponse)
+async def onboard_models(request: Request, mode: str = Form("duo"), framework: str = Form("")):
+    """Step 3: Model selection — adapts to chosen mode."""
+    state = get_session_state(request)
+    state["wizard_mode"] = mode
+    state["wizard_framework"] = framework
+
     plat = state.get("platform_info") or detect_platform()
     state["platform_info"] = plat
 
     model_list = get_available_models()
     model_names = [m["name"] for m in model_list]
 
-    recs = get_model_recommendations(plat, model_list)
-    state["model_recs"] = recs
+    fw_info = _FRAMEWORKS.get(framework, _FRAMEWORKS["other"]) if framework else None
 
-    return templates.TemplateResponse(
-        request=request,
-        name="onboard_wizard.html",
-        context={
-            "request": request,
-            "step": 2,
-            "platform": plat,
-            "available_models": model_names,
-            "model_sizes": {m["name"]: m["size_gb"] for m in model_list},
-            "recs": recs,
-            "default_fast_model": recs["orchestrator"]["selected"],
-            "default_smart_model": recs["heavy"]["selected"],
-            "suggest_fast": recs["orchestrator"]["suggest_download"],
-            "suggest_smart": recs["heavy"]["suggest_download"],
-        },
-    )
+    if mode == "solo":
+        solo_rec = get_solo_recommendation(plat, model_list)
+        state["model_recs_solo"] = solo_rec
+        return templates.TemplateResponse(
+            request=request,
+            name="onboard_wizard.html",
+            context={
+                "request": request,
+                "step": "models",
+                "mode": mode,
+                "platform": plat,
+                "available_models": model_names,
+                "model_sizes": {m["name"]: m["size_gb"] for m in model_list},
+                "solo_rec": solo_rec,
+            },
+        )
+    else:
+        # duo or agent mode — both use two-model selection
+        recs = get_model_recommendations(plat, model_list)
+        state["model_recs"] = recs
+        return templates.TemplateResponse(
+            request=request,
+            name="onboard_wizard.html",
+            context={
+                "request": request,
+                "step": "models",
+                "mode": mode,
+                "framework": fw_info,
+                "platform": plat,
+                "available_models": model_names,
+                "model_sizes": {m["name"]: m["size_gb"] for m in model_list},
+                "recs": recs,
+                "default_fast_model": recs["orchestrator"]["selected"],
+                "default_smart_model": recs["heavy"]["selected"],
+                "suggest_fast": recs["orchestrator"]["suggest_download"],
+                "suggest_smart": recs["heavy"]["suggest_download"],
+            },
+        )
 
 
 @app.post("/onboard/benchmark", response_class=HTMLResponse)
-async def onboard_step3(request: Request, fast_model: str = Form(...), smart_model: str = Form(...)):
-    """Step 3: Show measurement starting point."""
+async def onboard_benchmark(
+    request: Request,
+    fast_model: str = Form(""),
+    smart_model: str = Form(""),
+    solo_model: str = Form(""),
+):
+    """Step 4: Show measurement starting point."""
     state = get_session_state(request)
-    state["wizard_fast_model"] = fast_model
-    state["wizard_smart_model"] = smart_model
+    mode = state.get("wizard_mode", "duo")
+
+    if mode == "solo":
+        state["wizard_fast_model"] = solo_model
+        state["wizard_smart_model"] = solo_model
+    else:
+        state["wizard_fast_model"] = fast_model
+        state["wizard_smart_model"] = smart_model
     
     return templates.TemplateResponse(
         request=request,
         name="onboard_wizard.html",
         context={
             "request": request,
-            "step": 3,
-            "fast_model": fast_model,
-            "smart_model": smart_model,
+            "step": "benchmark",
+            "mode": mode,
+            "fast_model": state["wizard_fast_model"],
+            "smart_model": state["wizard_smart_model"],
         },
     )
 

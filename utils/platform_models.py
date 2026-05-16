@@ -440,3 +440,163 @@ def get_model_recommendations(
     result["warning"] = warning
 
     return result
+
+
+# ── Solo-model recommendations ──────────────────────────────────────
+
+# Priority-ordered list of the single best model for each tier.
+# The heavy-lifter model is usually the right solo pick (bigger = smarter).
+# For tiny tiers, the orchestrator IS the only option.
+
+_SOLO_TIERS: List[Dict[str, Any]] = [
+    {
+        "min_budget_gb": 100,
+        "ideal": "qwen3:72b",
+        "ideal_set": {
+            "qwen3:72b",
+            "qwen2.5:72b-instruct-q4_K_M",
+            "qwen2.5:72b-instruct-q5_K_M",
+            "deepseek-r1:70b",
+        },
+        "pull": "ollama pull qwen3:72b",
+        "size_gb": 42.0,
+        "why": (
+            "72B parameters — frontier-level reasoning and coding. "
+            "Your 128 GB of memory handles this easily."
+        ),
+        "priority": [
+            "qwen3:72b",
+            "qwen2.5:72b-instruct-q5_K_M",
+            "qwen2.5:72b-instruct-q4_K_M",
+            "deepseek-r1:70b",
+            "llama3.1:70b-instruct-q4_K_M",
+            "qwen2.5-coder:32b-instruct-q5_K_M",
+            "qwen2.5-coder:32b-instruct-q4_K_M",
+            "qwen2.5:32b-instruct-q5_K_M",
+            "qwen2.5:32b-instruct-q4_K_M",
+            "qwen3:8b", "hermes3:8b",
+        ],
+    },
+    {
+        "min_budget_gb": 48,
+        "ideal": "qwen2.5-coder:32b-instruct-q4_K_M",
+        "ideal_set": {
+            "qwen2.5-coder:32b-instruct-q4_K_M",
+            "qwen2.5-coder:32b-instruct-q5_K_M",
+            "qwen2.5:32b-instruct-q4_K_M",
+            "qwen2.5:32b-instruct-q5_K_M",
+        },
+        "pull": "ollama pull qwen2.5-coder:32b-instruct-q4_K_M",
+        "size_gb": 20.0,
+        "why": (
+            "32B code-trained model — strong reasoning and coding, "
+            "fits comfortably in your memory."
+        ),
+        "priority": [
+            "qwen2.5-coder:32b-instruct-q5_K_M",
+            "qwen2.5-coder:32b-instruct-q4_K_M",
+            "qwen2.5:32b-instruct-q5_K_M",
+            "qwen2.5:32b-instruct-q4_K_M",
+            "qwen3.6:27b", "qwen3.5:27b", "qwen3.5:35b",
+            "qwen3:30b",
+            "qwen3:8b", "hermes3:8b",
+        ],
+    },
+    {
+        "min_budget_gb": 24,
+        "ideal": "qwen2.5-coder:14b-instruct-q4_K_M",
+        "ideal_set": {
+            "qwen2.5-coder:14b-instruct-q4_K_M",
+            "qwen2.5:14b-instruct-q6_K",
+            "qwen2.5:14b-instruct-q4_K_M",
+        },
+        "pull": "ollama pull qwen2.5-coder:14b-instruct-q4_K_M",
+        "size_gb": 9.0,
+        "why": "14B code-trained model — good balance of speed and quality for 32 GB.",
+        "priority": [
+            "qwen2.5-coder:14b-instruct-q4_K_M",
+            "qwen2.5:14b-instruct-q6_K",
+            "qwen2.5:14b-instruct-q4_K_M",
+            "qwen3:8b", "hermes3:8b",
+            "qwen2.5-coder:7b",
+        ],
+    },
+    {
+        "min_budget_gb": 12,
+        "ideal": "qwen2.5-coder:7b",
+        "pull": "ollama pull qwen2.5-coder:7b",
+        "size_gb": 4.7,
+        "why": "7B code model — the largest that runs smoothly on 16 GB.",
+        "priority": [
+            "qwen2.5-coder:7b", "qwen3:8b", "hermes3:8b",
+            "qwen2.5:7b-instruct",
+            "nemotron-3-nano:4b",
+        ],
+    },
+    {
+        "min_budget_gb": 4,
+        "ideal": "qwen2.5-coder:3b",
+        "pull": "ollama pull qwen2.5-coder:3b",
+        "size_gb": 2.0,
+        "why": "3B code model — the largest feasible on 8 GB.",
+        "priority": [
+            "qwen2.5-coder:3b", "nemotron-3-nano:4b", "qwen2.5:3b",
+        ],
+    },
+    {
+        "min_budget_gb": 0,
+        "ideal": "qwen2.5-coder:1.5b",
+        "pull": "ollama pull qwen2.5-coder:1.5b",
+        "size_gb": 1.0,
+        "why": "1.5B is the practical limit on 4 GB total memory.",
+        "priority": [
+            "qwen2.5-coder:1.5b", "qwen2.5:1.5b",
+        ],
+    },
+]
+
+
+def get_solo_recommendation(
+    platform_info: Dict[str, Any],
+    installed_models: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Return the single best model recommendation for solo mode."""
+    budget = platform_info.get("model_budget_gb", 0)
+    installed_names = {m["name"] for m in installed_models}
+    installed_sizes = {m["name"]: m["size_gb"] for m in installed_models}
+
+    tier = _SOLO_TIERS[-1]
+    for t in _SOLO_TIERS:
+        if budget >= t["min_budget_gb"]:
+            tier = t
+            break
+
+    selected = None
+    for name in tier["priority"]:
+        if name in installed_names:
+            selected = name
+            break
+
+    ideal_set = tier.get("ideal_set", {tier["ideal"]})
+    is_ideal = selected in ideal_set
+    suggest = None
+    if not is_ideal:
+        suggest = {
+            "name": tier["ideal"],
+            "size_gb": tier["size_gb"],
+            "pull_cmd": tier["pull"],
+            "why": tier["why"],
+        }
+
+    selected_size = installed_sizes.get(selected, tier["size_gb"]) if selected else tier["size_gb"]
+    if not selected:
+        selected = tier["ideal"]
+
+    return {
+        "budget_gb": budget,
+        "selected": selected,
+        "selected_size_gb": selected_size,
+        "is_ideal": is_ideal,
+        "suggest_download": suggest,
+        "fits": selected_size <= (budget * 0.85),
+    }

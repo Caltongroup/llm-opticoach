@@ -19,18 +19,28 @@
 
         <div class="mb-8 bg-zinc-900 border border-emerald-500/40 rounded-3xl p-6">
             <h2 class="text-2xl font-semibold mb-4">Your Baseline</h2>
+            {% if baseline.fast_model == baseline.smart_model %}
+            {# Solo mode — one model #}
+            <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 mb-6">
+                <div class="text-sm text-zinc-400">{{ baseline.fast_model }}</div>
+                <div class="text-3xl font-semibold text-emerald-300 mt-2">{{ baseline.fast_tps }}</div>
+                <div class="text-xs text-zinc-500">tokens/sec</div>
+            </div>
+            {% else %}
+            {# Duo/agent mode — two models #}
             <div class="grid grid-cols-2 gap-4 mb-6">
                 <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
-                    <div class="text-sm text-zinc-400">Fast Model ({{ baseline.fast_model }})</div>
+                    <div class="text-sm text-zinc-400">Quick ({{ baseline.fast_model }})</div>
                     <div class="text-3xl font-semibold text-emerald-300 mt-2">{{ baseline.fast_tps }}</div>
                     <div class="text-xs text-zinc-500">tokens/sec</div>
                 </div>
                 <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
-                    <div class="text-sm text-zinc-400">Smart Model ({{ baseline.smart_model }})</div>
+                    <div class="text-sm text-zinc-400">Deep ({{ baseline.smart_model }})</div>
                     <div class="text-3xl font-semibold text-blue-300 mt-2">{{ baseline.smart_tps }}</div>
                     <div class="text-xs text-zinc-500">tokens/sec</div>
                 </div>
             </div>
+            {% endif %}
             <p class="text-sm text-zinc-400">Captured at {{ baseline.timestamp }}</p>
         </div>
 
