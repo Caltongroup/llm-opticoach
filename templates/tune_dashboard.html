@@ -44,6 +44,43 @@
             <p class="text-sm text-zinc-400">Captured at {{ baseline.timestamp }}</p>
         </div>
 
+        {% if best_config %}
+        <div class="mb-8 bg-zinc-900 border border-cyan-500/40 rounded-3xl p-6">
+            <h2 class="text-2xl font-semibold mb-3">Best Known Config</h2>
+            <p class="text-sm text-zinc-400 mb-4">Top historical performer from your persisted tuning runs.</p>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="text-sm text-zinc-400">Fast model</div>
+                    <div class="font-semibold text-emerald-300 mt-1">{{ best_config.fast_model }}</div>
+                    <div class="text-xs text-zinc-500 mt-1">{{ best_config.fast_tps }} tok/s • TTFT {{ best_config.fast_ttft }}s</div>
+                </div>
+                <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                    <div class="text-sm text-zinc-400">Deep model</div>
+                    <div class="font-semibold text-blue-300 mt-1">{{ best_config.smart_model }}</div>
+                    <div class="text-xs text-zinc-500 mt-1">{{ best_config.smart_tps }} tok/s • TTFT {{ best_config.smart_ttft }}s</div>
+                </div>
+            </div>
+            {% if best_config.note %}
+            <div class="text-sm text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-xl p-3">Change note: {{ best_config.note }}</div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if auto_recommendations %}
+        <div class="mb-8 bg-zinc-900 border border-orange-500/40 rounded-3xl p-6">
+            <h2 class="text-2xl font-semibold mb-4">Auto Recommendations</h2>
+            <div class="space-y-3">
+                {% for r in auto_recommendations %}
+                <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+                    <div class="font-semibold text-orange-300">{{ r.title }}</div>
+                    <div class="text-sm text-zinc-400 mt-1">{{ r.why }}</div>
+                    <div class="text-sm text-zinc-200 mt-2">{{ r.action }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
         <div class="mb-8 bg-zinc-900 border border-cyan-500/40 rounded-3xl p-6">
             <h2 class="text-2xl font-semibold mb-4">Easy Optimizations to Try</h2>
             <p class="text-sm text-zinc-400 mb-6">
@@ -133,6 +170,40 @@
                     Measure Now
                 </button>
             </form>
+        </div>
+
+        <div class="mb-8 bg-zinc-900 border border-emerald-500/40 rounded-3xl p-6">
+            <h2 class="text-2xl font-semibold mb-4">Recent Wins</h2>
+            <p class="text-sm text-zinc-400 mb-4">Saved from previous runs so you can quickly see what actually helped.</p>
+            <div class="space-y-3">
+                {% if recent_wins %}
+                    {% for w in recent_wins %}
+                    <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+                        <div class="flex items-start justify-between gap-4">
+                            <div>
+                                <div class="font-semibold">{{ w.label }}</div>
+                                <div class="text-xs text-zinc-500">{{ w.timestamp }}</div>
+                                {% if w.note %}
+                                <div class="text-sm text-zinc-400 mt-1">Change: {{ w.note }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="text-right text-xs text-zinc-400">
+                                {% if w.fast_tps_delta_pct is not none %}
+                                <div>Fast: <span class="text-emerald-300">{{ "%+.1f"|format(w.fast_tps_delta_pct) }}%</span></div>
+                                {% endif %}
+                                {% if w.smart_tps_delta_pct is not none %}
+                                <div>Deep: <span class="text-blue-300">{{ "%+.1f"|format(w.smart_tps_delta_pct) }}%</span></div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-6 text-zinc-400">
+                        <p>No wins saved yet. Run another measurement after an optimization to populate this panel.</p>
+                    </div>
+                {% endif %}
+            </div>
         </div>
 
         <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-6">

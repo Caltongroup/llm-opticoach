@@ -1,15 +1,20 @@
 """LLM OptiCoach web app routes and session-scoped orchestration."""
 
 import json
+import logging
 import os
 import re
 import secrets
+import sqlite3
 import subprocess
 import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -35,6 +40,368 @@ app.add_middleware(
     same_site="lax",
 )
 app.state.sessions: Dict[str, Dict[str, Any]] = {}
+log = logging.getLogger("opticoach")
+
+POCKETBASE_DB_PATH = Path(
+    os.getenv("POCKETBASE_DB_PATH", "/home/darrell/LLM/pocketbase/pb_data/data.db")
+).expanduser()
+TUNER_TABLE = "agent_soul_tuner_runs"
+LANCEDB_PATH = Path(
+    os.getenv("AGENT_MEMORY_DB_PATH", "/home/darrell/LLM/models/lancedb/agent_memory")
+).expanduser()
+LANCEDB_TABLE = os.getenv("AGENT_MEMORY_TABLE", "agent_memory")
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        if value in (None, "", "—"):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ensure_tuner_table() -> None:
+    if not POCKETBASE_DB_PATH.exists():
+        log.warning("PocketBase DB not found at %s", POCKETBASE_DB_PATH)
+        return
+
+    conn = sqlite3.connect(str(POCKETBASE_DB_PATH))
+    try:
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {TUNER_TABLE} (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                event_type TEXT,
+                label TEXT,
+                note TEXT,
+                fast_model TEXT,
+                smart_model TEXT,
+                fast_ttft REAL,
+                fast_tps REAL,
+                smart_ttft REAL,
+                smart_tps REAL,
+                fast_tps_delta_pct REAL,
+                smart_tps_delta_pct REAL,
+                fast_ttft_delta_pct REAL,
+                smart_ttft_delta_pct REAL,
+                timestamp TEXT,
+                created TEXT
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _pct_delta(new_val: Optional[float], baseline_val: Optional[float]) -> Optional[float]:
+    if new_val is None or baseline_val in (None, 0):
+        return None
+    return round(((new_val - baseline_val) / baseline_val) * 100.0, 2)
+
+
+def _store_tuner_run(
+    *,
+    session_id: str,
+    event_type: str,
+    measurement: Dict[str, Any],
+    note: str = "",
+    baseline: Optional[Dict[str, Any]] = None,
+) -> None:
+    if not POCKETBASE_DB_PATH.exists():
+        return
+
+    _ensure_tuner_table()
+    now = datetime.now(timezone.utc).isoformat()
+    fast_tps = _safe_float(measurement.get("fast_tps"))
+    smart_tps = _safe_float(measurement.get("smart_tps"))
+    fast_ttft = _safe_float(measurement.get("fast_ttft"))
+    smart_ttft = _safe_float(measurement.get("smart_ttft"))
+
+    fast_tps_delta = None
+    smart_tps_delta = None
+    fast_ttft_delta = None
+    smart_ttft_delta = None
+    if baseline:
+        fast_tps_delta = _pct_delta(fast_tps, _safe_float(baseline.get("fast_tps")))
+        smart_tps_delta = _pct_delta(smart_tps, _safe_float(baseline.get("smart_tps")))
+        fast_ttft_delta = _pct_delta(fast_ttft, _safe_float(baseline.get("fast_ttft")))
+        smart_ttft_delta = _pct_delta(smart_ttft, _safe_float(baseline.get("smart_ttft")))
+
+    conn = sqlite3.connect(str(POCKETBASE_DB_PATH))
+    try:
+        conn.execute(
+            f"""
+            INSERT INTO {TUNER_TABLE}
+            (
+                id, session_id, event_type, label, note,
+                fast_model, smart_model,
+                fast_ttft, fast_tps, smart_ttft, smart_tps,
+                fast_tps_delta_pct, smart_tps_delta_pct,
+                fast_ttft_delta_pct, smart_ttft_delta_pct,
+                timestamp, created
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4())[:8],
+                session_id,
+                event_type,
+                measurement.get("label", event_type),
+                note,
+                measurement.get("fast_model"),
+                measurement.get("smart_model"),
+                fast_ttft,
+                fast_tps,
+                smart_ttft,
+                smart_tps,
+                fast_tps_delta,
+                smart_tps_delta,
+                fast_ttft_delta,
+                smart_ttft_delta,
+                measurement.get("timestamp", now),
+                now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _store_tuning_insight_to_lancedb(measurement: Dict[str, Any], note: str) -> None:
+    # This is optional. If LanceDB dependencies are not available in this env,
+    # OptiCoach continues using PocketBase persistence only.
+    try:
+        import lancedb
+        import pyarrow as pa
+    except Exception:
+        return
+
+    if not LANCEDB_PATH.exists():
+        return
+
+    summary = (
+        f"Tuner run {measurement.get('label', 'measurement')}: "
+        f"fast={measurement.get('fast_model')} {measurement.get('fast_tps')} tok/s ttft={measurement.get('fast_ttft')}s; "
+        f"smart={measurement.get('smart_model')} {measurement.get('smart_tps')} tok/s ttft={measurement.get('smart_ttft')}s. "
+        f"Change: {note or 'none provided'}"
+    )
+
+    try:
+        db = lancedb.connect(str(LANCEDB_PATH))
+        try:
+            table = db.open_table(LANCEDB_TABLE)
+        except Exception:
+            schema = pa.schema(
+                [
+                    pa.field("commit_id", pa.string()),
+                    pa.field("parent_id", pa.string()),
+                    pa.field("source", pa.string()),
+                    pa.field("source_session_id", pa.string()),
+                    pa.field("role", pa.string()),
+                    pa.field("event_type", pa.string()),
+                    pa.field("content", pa.string()),
+                    pa.field("embedding", pa.list_(pa.float32(), 768)),
+                    pa.field("timestamp", pa.string()),
+                    pa.field("ingested_at", pa.string()),
+                    pa.field("importance", pa.float32()),
+                    pa.field("tier", pa.string()),
+                ]
+            )
+            table = db.create_table(LANCEDB_TABLE, schema=schema)
+
+        # Keep embedding as zero-vector fallback here to avoid adding network
+        # dependency on the embeddings endpoint in the request path.
+        now = datetime.now(timezone.utc).isoformat()
+        table.add(
+            [
+                {
+                    "commit_id": str(uuid.uuid4()).replace("-", "")[:16],
+                    "parent_id": measurement.get("label", "tuner"),
+                    "source": "opticoach",
+                    "source_session_id": "tuner",
+                    "role": "system",
+                    "event_type": "tuning.measurement",
+                    "content": summary,
+                    "embedding": [0.0] * 768,
+                    "timestamp": now,
+                    "ingested_at": now,
+                    "importance": 0.55,
+                    "tier": "tuning",
+                }
+            ]
+        )
+    except Exception as exc:
+        log.debug("LanceDB insight write skipped: %s", exc)
+
+
+def _load_recent_wins(limit: int = 6) -> list[Dict[str, Any]]:
+    if not POCKETBASE_DB_PATH.exists():
+        return []
+
+    _ensure_tuner_table()
+    conn = sqlite3.connect(str(POCKETBASE_DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT
+                label,
+                note,
+                fast_model,
+                smart_model,
+                fast_tps,
+                smart_tps,
+                fast_tps_delta_pct,
+                smart_tps_delta_pct,
+                fast_ttft_delta_pct,
+                smart_ttft_delta_pct,
+                timestamp,
+                created
+            FROM {TUNER_TABLE}
+            WHERE event_type = 'measurement'
+              AND (
+                COALESCE(fast_tps_delta_pct, 0) > 0
+                OR COALESCE(smart_tps_delta_pct, 0) > 0
+                OR COALESCE(fast_ttft_delta_pct, 0) < 0
+                OR COALESCE(smart_ttft_delta_pct, 0) < 0
+              )
+            ORDER BY datetime(created) DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+        wins: list[Dict[str, Any]] = []
+        for row in rows:
+            wins.append(
+                {
+                    "label": row["label"],
+                    "note": row["note"],
+                    "fast_model": row["fast_model"],
+                    "smart_model": row["smart_model"],
+                    "fast_tps": row["fast_tps"],
+                    "smart_tps": row["smart_tps"],
+                    "fast_tps_delta_pct": row["fast_tps_delta_pct"],
+                    "smart_tps_delta_pct": row["smart_tps_delta_pct"],
+                    "timestamp": row["timestamp"],
+                }
+            )
+        return wins
+    finally:
+        conn.close()
+
+
+def _load_best_known_config() -> Optional[Dict[str, Any]]:
+    if not POCKETBASE_DB_PATH.exists():
+        return None
+
+    _ensure_tuner_table()
+    conn = sqlite3.connect(str(POCKETBASE_DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            f"""
+            SELECT
+                label,
+                note,
+                fast_model,
+                smart_model,
+                fast_tps,
+                smart_tps,
+                fast_ttft,
+                smart_ttft,
+                timestamp,
+                created,
+                (COALESCE(fast_tps, 0) + COALESCE(smart_tps, 0)) AS score
+            FROM {TUNER_TABLE}
+            WHERE event_type IN ('baseline', 'measurement')
+            ORDER BY score DESC, datetime(created) DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if not row:
+            return None
+
+        return {
+            "label": row["label"],
+            "note": row["note"],
+            "fast_model": row["fast_model"],
+            "smart_model": row["smart_model"],
+            "fast_tps": row["fast_tps"],
+            "smart_tps": row["smart_tps"],
+            "fast_ttft": row["fast_ttft"],
+            "smart_ttft": row["smart_ttft"],
+            "timestamp": row["timestamp"],
+            "score": row["score"],
+        }
+    finally:
+        conn.close()
+
+
+def _build_auto_recommendations(
+    baseline: Dict[str, Any],
+    platform_info: Optional[Dict[str, Any]],
+    best_config: Optional[Dict[str, Any]],
+) -> list[Dict[str, str]]:
+    recs: list[Dict[str, str]] = []
+
+    fast_tps = _safe_float(baseline.get("fast_tps"))
+    smart_tps = _safe_float(baseline.get("smart_tps"))
+    smart_ttft = _safe_float(baseline.get("smart_ttft"))
+    fast_model = baseline.get("fast_model", "fast model")
+    smart_model = baseline.get("smart_model", "smart model")
+
+    is_jetson = bool((platform_info or {}).get("is_jetson"))
+    if is_jetson:
+        recs.append(
+            {
+                "title": "Lock Clocks Before Measuring",
+                "why": "Jetson clocks drifting between requests is one of the most common hidden slowdowns.",
+                "action": "Run: sudo nvpmodel -m 0 && sudo jetson_clocks, then run Measure Now.",
+            }
+        )
+
+    if smart_ttft is not None and smart_ttft > 2.0:
+        recs.append(
+            {
+                "title": "Prioritize Context Management",
+                "why": f"Current deep-model TTFT is {smart_ttft:.2f}s, which suggests prompt/context overhead.",
+                "action": "Use the Smart Context Management guide first, then re-measure.",
+            }
+        )
+
+    if smart_tps is not None and smart_tps < 8.0:
+        candidate = smart_model.replace("q5_K_M", "q4_K_M").replace("q5_0", "q4_0")
+        recs.append(
+            {
+                "title": "Try Lighter Quantization For Deep Model",
+                "why": f"Deep model throughput is {smart_tps:.1f} tok/s; q4 variants often improve this materially.",
+                "action": f"Test: ollama pull {candidate} and compare in Measure Now.",
+            }
+        )
+
+    if fast_tps is not None and fast_tps < 20.0:
+        recs.append(
+            {
+                "title": "Treat Fast Model As Router",
+                "why": f"Fast model is at {fast_tps:.1f} tok/s; aim for quick-response model behavior in this role.",
+                "action": f"Keep {fast_model} for tool calls/short tasks and reserve {smart_model} for heavy reasoning.",
+            }
+        )
+
+    if best_config:
+        recs.append(
+            {
+                "title": "Replay Best Known Setup",
+                "why": f"Your highest stored score uses {best_config['fast_model']} + {best_config['smart_model']}.",
+                "action": "Apply that model pair and note, then run Measure Now to validate on current load.",
+            }
+        )
+
+    # Keep recommendations concise and high-signal.
+    return recs[:4]
 
 
 def get_session_state(request: Request) -> Dict[str, Any]:
@@ -58,6 +425,9 @@ def get_session_state(request: Request) -> Dict[str, Any]:
             "routing_assertion_note": None,
         }
     return sessions[session_id]
+
+
+_ensure_tuner_table()
 
 
 def build_benchmark_delta(baseline: Dict[str, Any], latest: Dict[str, Any]) -> Dict[str, Any]:
@@ -381,24 +751,48 @@ def get_available_models() -> list:
         {"name": "qwen2.5-coder:7b", "size_gb": 4.7},
     ]
     try:
+        # Prefer Ollama JSON API for robust parsing and full model visibility.
+        import urllib.request
+
+        req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode())
+
+        models = []
+        for m in payload.get("models", []):
+            name = m.get("name", "")
+            if not name:
+                continue
+            if any(kw in name.lower() for kw in _EMBED_KEYWORDS):
+                continue
+            size_bytes = m.get("size", 0) or 0
+            size_gb = round(float(size_bytes) / (1024 ** 3), 2) if size_bytes else 0.0
+            models.append({"name": name, "size_gb": size_gb})
+
+        models.sort(key=lambda m: m["size_gb"])
+        if models:
+            return models
+    except Exception:
+        pass
+
+    # Fallback to CLI parsing if API probe fails.
+    try:
         result = subprocess.run(
             ["ollama", "list"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=20,
         )
         if result.returncode != 0:
             return FALLBACK
 
-        lines = result.stdout.strip().split("\n")[1:]  # Skip header line
+        lines = result.stdout.strip().split("\n")[1:]
         models = []
         for line in lines:
             parts = line.split()
-            # Columns: NAME  ID  SIZE  UNIT  MODIFIED...
             if len(parts) < 4:
                 continue
             name = parts[0]
-            # Skip embedding/rerank models
             if any(kw in name.lower() for kw in _EMBED_KEYWORDS):
                 continue
             size_str = parts[2] + " " + parts[3]
@@ -685,8 +1079,19 @@ def _measure_model_via_api(model_name: str, prompt: str = "Write a hello world f
             data=payload,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            data = json.loads(resp.read())
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            raw = resp.read().decode()
+            data = json.loads(raw)
+
+        # Ollama can return an error payload with HTTP 200.
+        if data.get("error"):
+            return {
+                "success": False,
+                "ttft": None,
+                "tps": None,
+                "model": model_name,
+                "error": str(data.get("error")),
+            }
 
         eval_count = data.get("eval_count", 0)
         eval_dur_ns = data.get("eval_duration", 0)
@@ -696,8 +1101,14 @@ def _measure_model_via_api(model_name: str, prompt: str = "Write a hello world f
         ttft = round(prompt_dur_ns / 1e9, 2) if prompt_dur_ns else 0
 
         return {"success": True, "ttft": ttft, "tps": tps, "model": model_name}
-    except Exception:
-        return {"success": False, "ttft": None, "tps": None, "model": model_name}
+    except Exception as exc:
+        return {
+            "success": False,
+            "ttft": None,
+            "tps": None,
+            "model": model_name,
+            "error": str(exc),
+        }
 
 
 def _safe_tps(result: Dict[str, Any]) -> str:
@@ -719,6 +1130,7 @@ async def measure_baseline(
 ):
     """Run baseline measurements on both models via Ollama API."""
     state = get_session_state(request)
+    session_id = request.session.get("sid", "unknown")
 
     fast_result = _measure_model_via_api(fast_model)
     smart_result = _measure_model_via_api(smart_model) if smart_model != fast_model else fast_result
@@ -730,11 +1142,20 @@ async def measure_baseline(
         "fast_tps": _safe_tps(fast_result),
         "smart_ttft": _safe_ttft(smart_result),
         "smart_tps": _safe_tps(smart_result),
+        "fast_error": fast_result.get("error"),
+        "smart_error": smart_result.get("error"),
         "timestamp": str(__import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     }
 
     state["wizard_baseline"] = baseline
     state["wizard_measurements"] = [{"label": "Baseline", **baseline}]
+    _store_tuner_run(
+        session_id=session_id,
+        event_type="baseline",
+        measurement={"label": "Baseline", **baseline},
+        note="Initial baseline capture",
+    )
+    _store_tuning_insight_to_lancedb({"label": "Baseline", **baseline}, "Initial baseline capture")
 
     return templates.TemplateResponse(
         request=request,
@@ -758,6 +1179,9 @@ async def tune_dashboard(request: Request):
         return render_error(request, "Please complete onboarding first", status_code=400)
     
     plat = state.get("platform_info") or detect_platform()
+    recent_wins = _load_recent_wins(limit=6)
+    best_config = _load_best_known_config()
+    auto_recommendations = _build_auto_recommendations(baseline, plat, best_config)
     
     return templates.TemplateResponse(
         request=request,
@@ -767,6 +1191,9 @@ async def tune_dashboard(request: Request):
             "baseline": baseline,
             "measurements": measurements[1:] if len(measurements) > 1 else [],
             "is_jetson": plat.get("is_jetson", False),
+            "recent_wins": recent_wins,
+            "best_config": best_config,
+            "auto_recommendations": auto_recommendations,
         },
     )
 
@@ -794,10 +1221,68 @@ async def pull_model(request: Request, model: str = Form(...)):
         return {"status": "error", "message": f"Failed to pull {model}: {e}"}
 
 
+@app.get("/pull-model-stream")
+async def pull_model_stream(model: str):
+    """Stream Ollama model pull progress as server-sent events."""
+    import httpx
+
+    if not re.match(r"^[a-zA-Z0-9._:/-]+$", model):
+        raise HTTPException(status_code=400, detail="Invalid model name")
+
+    async def event_stream():
+        yield f"data: {json.dumps({'stage': 'starting', 'status': f'Starting download for {model}'})}\n\n"
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST",
+                    "http://127.0.0.1:11434/api/pull",
+                    json={"name": model, "stream": True},
+                ) as resp:
+                    if resp.status_code >= 400:
+                        text = await resp.aread()
+                        yield f"data: {json.dumps({'stage': 'error', 'error': text.decode('utf-8', errors='replace')[:300]})}\n\n"
+                        return
+
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        try:
+                            payload = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        total = payload.get("total")
+                        completed = payload.get("completed")
+                        percent = None
+                        if isinstance(total, (int, float)) and total > 0 and isinstance(completed, (int, float)):
+                            percent = round((completed / total) * 100.0, 1)
+
+                        event = {
+                            "stage": "progress",
+                            "status": payload.get("status", "downloading"),
+                            "digest": payload.get("digest", ""),
+                            "total": total,
+                            "completed": completed,
+                            "percent": percent,
+                        }
+                        yield f"data: {json.dumps(event)}\n\n"
+
+            yield f"data: {json.dumps({'stage': 'done', 'status': f'{model} downloaded'})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'stage': 'error', 'error': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
 @app.post("/measure-again", response_class=HTMLResponse)
 async def measure_again(request: Request, what_changed: str = Form("")):
     """Run another measurement after an optimization."""
     state = get_session_state(request)
+    session_id = request.session.get("sid", "unknown")
     baseline = state.get("wizard_baseline")
     
     if not baseline:
@@ -825,6 +1310,20 @@ async def measure_again(request: Request, what_changed: str = Form("")):
     measurements = state.get("wizard_measurements", [baseline])
     measurements.append(new_measurement)
     state["wizard_measurements"] = measurements
+
+    _store_tuner_run(
+        session_id=session_id,
+        event_type="measurement",
+        measurement=new_measurement,
+        note=what_changed,
+        baseline=baseline,
+    )
+    _store_tuning_insight_to_lancedb(new_measurement, what_changed)
+
+    recent_wins = _load_recent_wins(limit=6)
+    plat = state.get("platform_info") or detect_platform()
+    best_config = _load_best_known_config()
+    auto_recommendations = _build_auto_recommendations(baseline, plat, best_config)
     
     return templates.TemplateResponse(
         request=request,
@@ -833,6 +1332,10 @@ async def measure_again(request: Request, what_changed: str = Form("")):
             "request": request,
             "baseline": baseline,
             "measurements": measurements[1:],
+            "recent_wins": recent_wins,
+            "is_jetson": plat.get("is_jetson", False),
+            "best_config": best_config,
+            "auto_recommendations": auto_recommendations,
         },
     )
 
@@ -841,7 +1344,10 @@ async def measure_again(request: Request, what_changed: str = Form("")):
 async def tune_guide(request: Request, guide_id: str):
     """Step-by-step guide for a specific optimization."""
     state = get_session_state(request)
-    baseline = state.get("wizard_baseline", {})
+    baseline = state.get("wizard_baseline")
+    if not baseline:
+        return render_error(request, "Please complete onboarding first", status_code=400)
+
     smart_model = baseline.get("smart_model", "your smart model")
     fast_model = baseline.get("fast_model", "your fast model")
 
@@ -1111,7 +1617,14 @@ async def tune_guide(request: Request, guide_id: str):
     return templates.TemplateResponse(
         request=request,
         name="tune_guide.html",
-        context={"request": request, "guide": guide},
+        context={
+            "request": request,
+            "guide": guide,
+            "guide_id": guide_id,
+            "fast_model": fast_model,
+            "smart_model": smart_model,
+            "same_model": fast_model == smart_model,
+        },
     )
 
 

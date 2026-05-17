@@ -328,7 +328,7 @@
                         <span>{{ solo_rec.suggest_download.pull_cmd }}</span>
                     </div>
                     <div class="flex gap-2">
-                        <button onclick="pullModel('{{ solo_rec.suggest_download.model_tag }}', this)" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors">
+                        <button onclick="pullModel('{{ solo_rec.suggest_download.model_tag }}', this, 'pull-status-solo')" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors">
                             <i class="fa-solid fa-download mr-2"></i>Download now
                         </button>
                         <button onclick="navigator.clipboard.writeText('{{ solo_rec.suggest_download.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-400 hover:text-white text-xs px-3 py-2 border border-zinc-700 rounded-xl">Copy</button>
@@ -415,7 +415,7 @@
                             <span>{{ suggest_fast.pull_cmd }}</span>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="pullModel('{{ suggest_fast.model_tag }}', this)" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-2 rounded-xl transition-colors">
+                            <button onclick="pullModel('{{ suggest_fast.model_tag }}', this, 'pull-status-fast')" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-2 rounded-xl transition-colors">
                                 <i class="fa-solid fa-download mr-2"></i>Download
                             </button>
                             <button onclick="navigator.clipboard.writeText('{{ suggest_fast.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-400 hover:text-white text-xs px-3 py-2 border border-zinc-700 rounded-xl">Copy</button>
@@ -435,7 +435,7 @@
                             <span>{{ suggest_smart.pull_cmd }}</span>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="pullModel('{{ suggest_smart.model_tag }}', this)" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold py-2 rounded-xl transition-colors">
+                            <button onclick="pullModel('{{ suggest_smart.model_tag }}', this, 'pull-status-smart')" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold py-2 rounded-xl transition-colors">
                                 <i class="fa-solid fa-download mr-2"></i>Download
                             </button>
                             <button onclick="navigator.clipboard.writeText('{{ suggest_smart.pull_cmd }}'); this.textContent='Copied!'" class="text-zinc-400 hover:text-white text-xs px-3 py-2 border border-zinc-700 rounded-xl">Copy</button>
@@ -612,15 +612,24 @@
                     <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
                         <div class="text-sm text-zinc-400 mb-1">Quick Model ({{ baseline.fast_model }})</div>
                         <div class="text-2xl font-semibold text-emerald-300">{{ baseline.fast_tps }} tok/s</div>
+                        {% if baseline.fast_error %}
+                        <div class="text-xs text-amber-300 mt-2">Benchmark note: {{ baseline.fast_error }}</div>
+                        {% endif %}
                     </div>
                     <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
                         <div class="text-sm text-zinc-400 mb-1">Deep Model ({{ baseline.smart_model }})</div>
                         <div class="text-2xl font-semibold text-blue-300">{{ baseline.smart_tps }} tok/s</div>
+                        {% if baseline.smart_error %}
+                        <div class="text-xs text-amber-300 mt-2">Benchmark note: {{ baseline.smart_error }}</div>
+                        {% endif %}
                     </div>
                     {% else %}
                     <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
                         <div class="text-sm text-zinc-400 mb-1">{{ baseline.fast_model }}</div>
                         <div class="text-2xl font-semibold text-emerald-300">{{ baseline.fast_tps }} tok/s</div>
+                        {% if baseline.fast_error %}
+                        <div class="text-xs text-amber-300 mt-2">Benchmark note: {{ baseline.fast_error }}</div>
+                        {% endif %}
                     </div>
                     {% endif %}
                 </div>
@@ -641,37 +650,82 @@
     </div>
 
 <script>
-async function pullModel(modelName, btn) {
+async function pullModel(modelName, btn, statusId) {
     const origHTML = btn.innerHTML;
+    const statusEl = document.getElementById(statusId);
+
+    if (statusEl) {
+        statusEl.classList.remove('hidden');
+        statusEl.classList.remove('bg-red-500/10', 'border-red-500/40', 'bg-emerald-500/10', 'border-emerald-500/40');
+        statusEl.classList.add('bg-blue-500/10', 'border', 'border-blue-500/40');
+        statusEl.innerHTML = '<div class="text-blue-200">Starting download...</div><div class="w-full h-2 bg-zinc-800 rounded mt-2 overflow-hidden"><div id="pull-progress-' + statusId + '" class="h-2 bg-blue-400" style="width: 2%"></div></div>';
+    }
+
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Downloading…';
     btn.classList.add('opacity-70');
 
     try {
-        const resp = await fetch('/pull-model', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: 'model=' + encodeURIComponent(modelName)
-        });
-        const data = await resp.json();
-        if (data.status === 'ok') {
-            btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i>Downloaded!';
-            btn.classList.remove('opacity-70');
-            btn.classList.add('bg-emerald-700');
-            // Auto-refresh after 2s so the model appears in the dropdown
-            setTimeout(() => location.reload(), 2000);
-        } else {
-            btn.innerHTML = '<i class="fa-solid fa-xmark mr-2"></i>Failed';
-            btn.classList.remove('opacity-70');
-            btn.classList.add('bg-red-700');
-            console.error('Pull failed:', data.message);
-            setTimeout(() => { btn.innerHTML = origHTML; btn.disabled = false; btn.classList.remove('bg-red-700'); }, 4000);
-        }
+        const es = new EventSource('/pull-model-stream?model=' + encodeURIComponent(modelName));
+        let completed = false;
+
+        es.onmessage = (evt) => {
+            const data = JSON.parse(evt.data);
+            if (data.stage === 'progress') {
+                if (statusEl) {
+                    const pct = (data.percent !== null && data.percent !== undefined) ? data.percent : 2;
+                    const bar = document.getElementById('pull-progress-' + statusId);
+                    if (bar) bar.style.width = Math.max(2, Math.min(100, pct)) + '%';
+                    statusEl.querySelector('div').textContent = data.status + (data.percent !== null && data.percent !== undefined ? (' (' + data.percent + '%)') : '');
+                }
+                return;
+            }
+
+            if (data.stage === 'done') {
+                completed = true;
+                es.close();
+                btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i>Downloaded!';
+                btn.classList.remove('opacity-70');
+                btn.classList.add('bg-emerald-700');
+                if (statusEl) {
+                    statusEl.classList.remove('bg-blue-500/10', 'border-blue-500/40');
+                    statusEl.classList.add('bg-emerald-500/10', 'border-emerald-500/40');
+                    statusEl.innerHTML = '<div class="text-emerald-200">Download complete. Refreshing model list...</div>';
+                }
+                setTimeout(() => location.reload(), 1500);
+                return;
+            }
+
+            if (data.stage === 'error') {
+                es.close();
+                throw new Error(data.error || 'Download failed');
+            }
+        };
+
+        es.onerror = () => {
+            if (!completed) {
+                es.close();
+                btn.innerHTML = '<i class="fa-solid fa-xmark mr-2"></i>Error';
+                btn.classList.remove('opacity-70');
+                btn.classList.add('bg-red-700');
+                if (statusEl) {
+                    statusEl.classList.remove('bg-blue-500/10', 'border-blue-500/40');
+                    statusEl.classList.add('bg-red-500/10', 'border-red-500/40');
+                    statusEl.innerHTML = '<div class="text-red-200">Streaming connection lost while pulling model.</div>';
+                }
+                setTimeout(() => { btn.innerHTML = origHTML; btn.disabled = false; btn.classList.remove('bg-red-700'); }, 4000);
+            }
+        };
+        return;
     } catch (err) {
         btn.innerHTML = '<i class="fa-solid fa-xmark mr-2"></i>Error';
         btn.classList.remove('opacity-70');
         btn.classList.add('bg-red-700');
-        console.error('Pull error:', err);
+        if (statusEl) {
+            statusEl.classList.remove('bg-blue-500/10', 'border-blue-500/40');
+            statusEl.classList.add('bg-red-500/10', 'border-red-500/40');
+            statusEl.innerHTML = '<div class="text-red-200">' + (err.message || 'Download failed') + '</div>';
+        }
         setTimeout(() => { btn.innerHTML = origHTML; btn.disabled = false; btn.classList.remove('bg-red-700'); }, 4000);
     }
 }

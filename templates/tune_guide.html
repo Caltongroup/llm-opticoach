@@ -19,6 +19,16 @@
             <p class="text-zinc-400 text-lg">{{ guide.subtitle }}</p>
         </div>
 
+        <div class="mb-6 bg-zinc-900 border border-zinc-700 rounded-2xl p-4">
+            <div class="text-xs text-zinc-500 uppercase tracking-wide mb-2">Current Models</div>
+            {% if same_model %}
+            <div class="text-sm text-zinc-300"><strong>Single model:</strong> {{ fast_model }}</div>
+            {% else %}
+            <div class="text-sm text-zinc-300 mb-1"><strong>Fast:</strong> {{ fast_model }}</div>
+            <div class="text-sm text-zinc-300"><strong>Deep:</strong> {{ smart_model }}</div>
+            {% endif %}
+        </div>
+
         {% if guide.applies_to %}
         <div class="mb-6 inline-flex items-center gap-2 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2 text-sm">
             <i class="fa-solid fa-tag text-zinc-500"></i>
@@ -56,12 +66,21 @@
                         {% if step.commands %}
                         <div class="space-y-2">
                             {% for cmd in step.commands %}
-                            <div class="bg-black/60 border border-zinc-800 rounded-xl p-3 flex items-center justify-between gap-3">
-                                <code class="text-emerald-300 text-sm font-mono">{{ cmd }}</code>
+                            <div class="bg-black/60 border border-zinc-800 rounded-xl p-3">
+                                <div class="flex items-center justify-between gap-3 mb-2">
+                                    <div class="text-xs text-zinc-500">Command {{ loop.index }}</div>
+                                    <button
+                                        data-command='{{ cmd | tojson | safe }}'
+                                        onclick="copyCmd(this)"
+                                        class="flex-shrink-0 text-xs text-zinc-500 hover:text-zinc-200 px-2 py-1 border border-zinc-700 rounded-lg transition-colors">
+                                        Copy
+                                    </button>
+                                </div>
+                                <pre class="text-emerald-300 text-sm font-mono whitespace-pre-wrap break-words overflow-x-auto"><code>{{ cmd }}</code></pre>
                                 <button
-                                    onclick="copyCmd(this, '{{ cmd | replace("'", "\\'") }}')"
-                                    class="flex-shrink-0 text-xs text-zinc-500 hover:text-zinc-200 px-2 py-1 border border-zinc-700 rounded-lg transition-colors">
-                                    Copy
+                                    onclick="runInTerminalHint(this)"
+                                    class="mt-2 text-xs text-zinc-500 hover:text-zinc-200 px-2 py-1 border border-zinc-700 rounded-lg transition-colors">
+                                    Use In Terminal
                                 </button>
                             </div>
                             {% endfor %}
@@ -84,7 +103,7 @@
                 Run another measurement now and we'll compare it to your baseline automatically.
             </p>
             <form method="post" action="/measure-again">
-                <input type="hidden" name="what_changed" value="{{ guide.title }}">
+                <input type="text" name="what_changed" value="{{ guide.title }}" class="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-yellow-500 mb-3" />
                 <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-500 transition-colors text-white font-semibold py-3 rounded-2xl">
                     Measure now — did it help?
                 </button>
@@ -97,7 +116,8 @@
     </div>
 
     <script>
-        function copyCmd(btn, text) {
+        function copyCmd(btn) {
+            const text = JSON.parse(btn.getAttribute('data-command'));
             navigator.clipboard.writeText(text).then(() => {
                 btn.textContent = 'Copied!';
                 btn.classList.add('text-emerald-400', 'border-emerald-700');
@@ -106,6 +126,15 @@
                     btn.classList.remove('text-emerald-400', 'border-emerald-700');
                 }, 2000);
             });
+        }
+
+        function runInTerminalHint(btn) {
+            btn.textContent = 'Paste in your terminal';
+            btn.classList.add('text-cyan-300', 'border-cyan-700');
+            setTimeout(() => {
+                btn.textContent = 'Use In Terminal';
+                btn.classList.remove('text-cyan-300', 'border-cyan-700');
+            }, 1800);
         }
     </script>
 </body>
