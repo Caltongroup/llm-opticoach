@@ -1,3 +1,50 @@
+
+# === Benchmark Reliability Improvements ===
+import asyncio
+from functools import wraps
+
+def safe_benchmark(timeout=25):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await asyncio.wait_for(func(*args, **kwargs), timeout=timeout)
+            except asyncio.TimeoutError:
+                return {"success": False, "error": "Benchmark timed out"}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        return wrapper
+    return decorator
+
+
+# === Benchmark Hardening ===
+import asyncio
+from functools import wraps
+
+def benchmark_timeout(seconds=30):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await asyncio.wait_for(func(*args, **kwargs), timeout=seconds)
+            except asyncio.TimeoutError:
+                return {"error": "Benchmark timed out", "success": False}
+        return wrapper
+    return decorator
+
+import psutil
+
+def get_app_memory_mb():
+    try:
+        import psutil, os
+        process = psutil.Process(os.getpid())
+        return round(process.memory_info().rss / (1024 * 1024), 1)
+    except:
+        return 0
+# === v1 WIZARD ROUTES (Active) ===
+
+# === v1 WIZARD ROUTES (Active) ===
+
 """LLM OptiCoach web app routes and session-scoped orchestration."""
 
 import json
@@ -167,73 +214,6 @@ def _store_tuner_run(
         conn.commit()
     finally:
         conn.close()
-
-
-def _store_tuning_insight_to_lancedb(measurement: Dict[str, Any], note: str) -> None:
-    # This is optional. If LanceDB dependencies are not available in this env,
-    # OptiCoach continues using PocketBase persistence only.
-    try:
-        import lancedb
-        import pyarrow as pa
-    except Exception:
-        return
-
-    if not LANCEDB_PATH.exists():
-        return
-
-    summary = (
-        f"Tuner run {measurement.get('label', 'measurement')}: "
-        f"fast={measurement.get('fast_model')} {measurement.get('fast_tps')} tok/s ttft={measurement.get('fast_ttft')}s; "
-        f"smart={measurement.get('smart_model')} {measurement.get('smart_tps')} tok/s ttft={measurement.get('smart_ttft')}s. "
-        f"Change: {note or 'none provided'}"
-    )
-
-    try:
-        db = lancedb.connect(str(LANCEDB_PATH))
-        try:
-            table = db.open_table(LANCEDB_TABLE)
-        except Exception:
-            schema = pa.schema(
-                [
-                    pa.field("commit_id", pa.string()),
-                    pa.field("parent_id", pa.string()),
-                    pa.field("source", pa.string()),
-                    pa.field("source_session_id", pa.string()),
-                    pa.field("role", pa.string()),
-                    pa.field("event_type", pa.string()),
-                    pa.field("content", pa.string()),
-                    pa.field("embedding", pa.list_(pa.float32(), 768)),
-                    pa.field("timestamp", pa.string()),
-                    pa.field("ingested_at", pa.string()),
-                    pa.field("importance", pa.float32()),
-                    pa.field("tier", pa.string()),
-                ]
-            )
-            table = db.create_table(LANCEDB_TABLE, schema=schema)
-
-        # Keep embedding as zero-vector fallback here to avoid adding network
-        # dependency on the embeddings endpoint in the request path.
-        now = datetime.now(timezone.utc).isoformat()
-        table.add(
-            [
-                {
-                    "commit_id": str(uuid.uuid4()).replace("-", "")[:16],
-                    "parent_id": measurement.get("label", "tuner"),
-                    "source": "opticoach",
-                    "source_session_id": "tuner",
-                    "role": "system",
-                    "event_type": "tuning.measurement",
-                    "content": summary,
-                    "embedding": [0.0] * 768,
-                    "timestamp": now,
-                    "ingested_at": now,
-                    "importance": 0.55,
-                    "tier": "tuning",
-                }
-            ]
-        )
-    except Exception as exc:
-        log.debug("LanceDB insight write skipped: %s", exc)
 
 
 def _load_recent_wins(limit: int = 6) -> list[Dict[str, Any]]:
@@ -490,228 +470,228 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     return render_error(request, str(exc.detail), status_code=exc.status_code)
 
 
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context={"request": request},
-    )
-
-
-@app.get("/scan", response_class=HTMLResponse)
-async def scan_page(request: Request):
-    state = get_session_state(request)
-    if not state.get("last_diagnostic"):
-        report = full_diagnostic(model_path=None)
-        state["last_diagnostic"] = report
-    return render_scan_results(request, state)
-
-
-@app.post("/scan", response_class=HTMLResponse)
-async def run_scan(request: Request, model_path: Optional[str] = Form(None)):
-    state = get_session_state(request)
-    report = full_diagnostic(model_path=model_path)
-    state["last_diagnostic"] = report
-    return render_scan_results(request, state)
-
-
-@app.post("/coach", response_class=HTMLResponse)
-async def get_coach(
-    request: Request,
-    user_notes: str = Form(...),
-    api_key: str = Form(...),
-    base_url: str = Form("https://api.openai.com/v1"),
-    model: str = Form("gpt-4o-mini"),
-):
-    state = get_session_state(request)
-    if not state.get("last_diagnostic"):
-        return render_error(request, "Please run a diagnostic scan first", status_code=400)
-
-    state["user_api_key"] = api_key
-    state["user_base_url"] = base_url
-    state["user_model"] = model
-
-    prompt = build_diagnostic_prompt(state["last_diagnostic"], user_notes)
-    req = CoachRequest(
-        system_prompt=DIAGNOSTIC_COACH_SYSTEM,
-        user_prompt=prompt,
-        model=model,
-        api_key=api_key,
-        base_url=base_url,
-    )
-    response = call_coach(req)
-    if response.success:
-        return templates.TemplateResponse(
-            request=request,
-            name="coach_response.html",
-            context={"request": request, "advice": response.response_text},
-        )
-    return render_error(request, f"Coach failed: {response.error}", status_code=500)
-
-
-@app.post("/benchmark", response_class=HTMLResponse)
-async def run_benchmark(
-    request: Request,
-    benchmark_prompt: str = Form(
-        "Measure coding assistant response quality and speed for Jetson local developer workflow."
-    ),
-    api_key: str = Form(""),
-    base_url: str = Form(""),
-    model: str = Form(""),
-    action: str = Form("run"),
-):
-    state = get_session_state(request)
-    if not state.get("last_diagnostic"):
-        return render_error(request, "Please run a diagnostic scan first", status_code=400)
-
-    if action == "set_baseline":
-        if not state.get("last_benchmark"):
-            return render_error(request, "Run a benchmark first before setting baseline", status_code=400)
-        state["benchmark_baseline"] = state["last_benchmark"]
-        state["benchmark_delta"] = None
-        state["benchmark_note"] = "Baseline updated from latest benchmark run."
-        return render_scan_results(request, state)
-
-    if action == "clear_baseline":
-        state["benchmark_baseline"] = None
-        state["benchmark_delta"] = None
-        state["benchmark_note"] = "Benchmark baseline cleared."
-        return render_scan_results(request, state)
-
-    resolved_api_key = (api_key or "").strip() or state.get("user_api_key")
-    resolved_base_url = (base_url or "").strip() or state.get("user_base_url", "https://api.openai.com/v1")
-    resolved_model = (model or "").strip() or state.get("user_model", "gpt-4o-mini")
-
-    if not resolved_api_key:
-        state["benchmark_note"] = "Add your API key, then click Run Benchmark."
-        return render_scan_results(request, state)
-
-    state["user_api_key"] = resolved_api_key
-    state["user_base_url"] = resolved_base_url
-    state["user_model"] = resolved_model
-
-    benchmark_req = CoachRequest(
-        system_prompt=DIAGNOSTIC_COACH_SYSTEM,
-        user_prompt=benchmark_prompt,
-        model=resolved_model,
-        api_key=resolved_api_key,
-        base_url=resolved_base_url,
-        temperature=0.0,
-        max_tokens=512,
-    )
-
-    pre_snapshot = benchmark_snapshot()
-    result = run_inference_benchmark(benchmark_req, benchmark_prompt=benchmark_prompt)
-    post_snapshot = benchmark_snapshot()
-    result["system_snapshot_before"] = pre_snapshot
-    result["system_snapshot_after"] = post_snapshot
-    state["last_benchmark"] = result
-
-    baseline = state.get("benchmark_baseline")
-    if baseline and baseline.get("success") and result.get("success"):
-        state["benchmark_delta"] = build_benchmark_delta(baseline, result)
-        state["benchmark_note"] = "Compared latest run against your saved baseline."
-    elif not baseline and result.get("success"):
-        state["benchmark_baseline"] = result
-        state["benchmark_delta"] = None
-        state["benchmark_note"] = "First successful benchmark saved as baseline."
-    else:
-        state["benchmark_delta"] = None
-        state["benchmark_note"] = "Benchmark run failed. Review error and retry."
-
-    return render_scan_results(request, state)
-
-
-@app.post("/routing-assert", response_class=HTMLResponse)
-async def routing_assert(
-    request: Request,
-    api_key: str = Form(""),
-    base_url: str = Form(""),
-    model: str = Form(""),
-):
-    state = get_session_state(request)
-    report = state.get("last_diagnostic")
-    if not report:
-        return render_error(request, "Please run a diagnostic scan first", status_code=400)
-
-    resolved_api_key = (api_key or "").strip() or state.get("user_api_key")
-    resolved_base_url = (base_url or "").strip() or state.get("user_base_url", "https://api.openai.com/v1")
-    resolved_model = (model or "").strip() or state.get("user_model", "gpt-4o-mini")
-
-    if not resolved_api_key:
-        state["routing_assertion_note"] = "Add your API key, then click Run Routing Assertion Test."
-        return render_scan_results(request, state)
-
-    state["user_api_key"] = resolved_api_key
-    state["user_base_url"] = resolved_base_url
-    state["user_model"] = resolved_model
-
-    serving = report.get("serving", {})
-    expected_primary = serving.get("primary_model_candidate")
-    expected_fallbacks = serving.get("fallback_chain", []) or []
-
-    req = CoachRequest(
-        system_prompt=DIAGNOSTIC_COACH_SYSTEM,
-        user_prompt="Routing assertion",
-        model=resolved_model,
-        api_key=resolved_api_key,
-        base_url=resolved_base_url,
-        temperature=0.0,
-        max_tokens=80,
-    )
-
-    assertion = run_routing_assertion(
-        req,
-        expected_primary=expected_primary,
-        expected_fallbacks=expected_fallbacks,
-    )
-    state["routing_assertion"] = assertion
-
-    if assertion.get("success"):
-        if assertion.get("verdict") == "pass":
-            state["routing_assertion_note"] = "Assertion passed: responding model aligns with inferred chain."
-        else:
-            state["routing_assertion_note"] = "Assertion warning: response model did not clearly match inferred chain."
-    else:
-        state["routing_assertion_note"] = "Assertion failed: unable to verify runtime routing from API response."
-
-    return render_scan_results(request, state)
-
-
-@app.post("/referee", response_class=HTMLResponse)
-async def referee_change(
-    request: Request,
-    proposed_change: str = Form(...),
-    extra_context: str = Form(""),
-):
-    state = get_session_state(request)
-    if not state.get("last_diagnostic") or not state.get("user_api_key"):
-        return render_error(request, "Need a recent diagnostic + API key first", status_code=400)
-
-    prompt = build_referee_prompt(proposed_change, state["last_diagnostic"], extra_context)
-    req = CoachRequest(
-        system_prompt=REFEREE_SYSTEM,
-        user_prompt=prompt,
-        model=state["user_model"],
-        api_key=state["user_api_key"],
-        base_url=state["user_base_url"],
-        temperature=0.2,
-    )
-    response = call_coach(req)
-    if response.success:
-        return templates.TemplateResponse(
-            request=request,
-            name="referee_response.html",
-            context={
-                "request": request,
-                "verdict": response.response_text,
-                "proposed_change": proposed_change,
-            },
-        )
-    return render_error(request, response.error or "Referee failed", status_code=500)
-
-
+# # # @app.get("/", response_class=HTMLResponse)
+# # # async def home(request: Request):
+# # #     return templates.TemplateResponse(
+# # #         request=request,
+# # #         name="index.html",
+# # #         context={"request": request},
+# # #     )
+# # # 
+# # # 
+# # # @app.get("/scan", response_class=HTMLResponse)
+# # # async def scan_page(request: Request):
+# # #     state = get_session_state(request)
+# # #     if not state.get("last_diagnostic"):
+# # #         report = full_diagnostic(model_path=None)
+# # #         state["last_diagnostic"] = report
+# # #     return render_scan_results(request, state)
+# # # 
+# # # 
+# # # @app.post("/scan", response_class=HTMLResponse)
+# # # async def run_scan(request: Request, model_path: Optional[str] = Form(None)):
+# # #     state = get_session_state(request)
+# # #     report = full_diagnostic(model_path=model_path)
+# # #     state["last_diagnostic"] = report
+# # #     return render_scan_results(request, state)
+# # # 
+# # # 
+# # # @app.post("/coach", response_class=HTMLResponse)
+# # # async def get_coach(
+# # #     request: Request,
+# # #     user_notes: str = Form(...),
+# # #     api_key: str = Form(...),
+# # #     base_url: str = Form("https://api.openai.com/v1"),
+# # #     model: str = Form("gpt-4o-mini"),
+# # # ):
+# # #     state = get_session_state(request)
+# # #     if not state.get("last_diagnostic"):
+# # #         return render_error(request, "Please run a diagnostic scan first", status_code=400)
+# # # 
+# # #     state["user_api_key"] = api_key
+# # #     state["user_base_url"] = base_url
+# # #     state["user_model"] = model
+# # # 
+# # #     prompt = build_diagnostic_prompt(state["last_diagnostic"], user_notes)
+# # #     req = CoachRequest(
+# # #         system_prompt=DIAGNOSTIC_COACH_SYSTEM,
+# # #         user_prompt=prompt,
+# # #         model=model,
+# # #         api_key=api_key,
+# # #         base_url=base_url,
+# # #     )
+# # #     response = call_coach(req)
+# # #     if response.success:
+# # #         return templates.TemplateResponse(
+# # #             request=request,
+# # #             name="coach_response.html",
+# # #             context={"request": request, "advice": response.response_text},
+# # #         )
+# # #     return render_error(request, f"Coach failed: {response.error}", status_code=500)
+# # # 
+# # # 
+# # # @app.post("/benchmark", response_class=HTMLResponse)
+# # # async def run_benchmark(
+# # #     request: Request,
+# # #     benchmark_prompt: str = Form(
+# # #         "Measure coding assistant response quality and speed for Jetson local developer workflow."
+# # #     ),
+# # #     api_key: str = Form(""),
+# # #     base_url: str = Form(""),
+# # #     model: str = Form(""),
+# # #     action: str = Form("run"),
+# # # ):
+# # #     state = get_session_state(request)
+# # #     if not state.get("last_diagnostic"):
+# # #         return render_error(request, "Please run a diagnostic scan first", status_code=400)
+# # # 
+# # #     if action == "set_baseline":
+# # #         if not state.get("last_benchmark"):
+# # #             return render_error(request, "Run a benchmark first before setting baseline", status_code=400)
+# # #         state["benchmark_baseline"] = state["last_benchmark"]
+# # #         state["benchmark_delta"] = None
+# # #         state["benchmark_note"] = "Baseline updated from latest benchmark run."
+# # #         return render_scan_results(request, state)
+# # # 
+# # #     if action == "clear_baseline":
+# # #         state["benchmark_baseline"] = None
+# # #         state["benchmark_delta"] = None
+# # #         state["benchmark_note"] = "Benchmark baseline cleared."
+# # #         return render_scan_results(request, state)
+# # # 
+# # #     resolved_api_key = (api_key or "").strip() or state.get("user_api_key")
+# # #     resolved_base_url = (base_url or "").strip() or state.get("user_base_url", "https://api.openai.com/v1")
+# # #     resolved_model = (model or "").strip() or state.get("user_model", "gpt-4o-mini")
+# # # 
+# # #     if not resolved_api_key:
+# # #         state["benchmark_note"] = "Add your API key, then click Run Benchmark."
+# # #         return render_scan_results(request, state)
+# # # 
+# # #     state["user_api_key"] = resolved_api_key
+# # #     state["user_base_url"] = resolved_base_url
+# # #     state["user_model"] = resolved_model
+# # # 
+# # #     benchmark_req = CoachRequest(
+# # #         system_prompt=DIAGNOSTIC_COACH_SYSTEM,
+# # #         user_prompt=benchmark_prompt,
+# # #         model=resolved_model,
+# # #         api_key=resolved_api_key,
+# # #         base_url=resolved_base_url,
+# # #         temperature=0.0,
+# # #         max_tokens=512,
+# # #     )
+# # # 
+# # #     pre_snapshot = benchmark_snapshot()
+# # #     result = run_inference_benchmark(benchmark_req, benchmark_prompt=benchmark_prompt)
+# # #     post_snapshot = benchmark_snapshot()
+# # #     result["system_snapshot_before"] = pre_snapshot
+# # #     result["system_snapshot_after"] = post_snapshot
+# # #     state["last_benchmark"] = result
+# # # 
+# # #     baseline = state.get("benchmark_baseline")
+# # #     if baseline and baseline.get("success") and result.get("success"):
+# # #         state["benchmark_delta"] = build_benchmark_delta(baseline, result)
+# # #         state["benchmark_note"] = "Compared latest run against your saved baseline."
+# # #     elif not baseline and result.get("success"):
+# # #         state["benchmark_baseline"] = result
+# # #         state["benchmark_delta"] = None
+# # #         state["benchmark_note"] = "First successful benchmark saved as baseline."
+# # #     else:
+# # #         state["benchmark_delta"] = None
+# # #         state["benchmark_note"] = "Benchmark run failed. Review error and retry."
+# # # 
+# # #     return render_scan_results(request, state)
+# # # 
+# # # 
+# # # @app.post("/routing-assert", response_class=HTMLResponse)
+# # # async def routing_assert(
+# # #     request: Request,
+# # #     api_key: str = Form(""),
+# # #     base_url: str = Form(""),
+# # #     model: str = Form(""),
+# # # ):
+# # #     state = get_session_state(request)
+# # #     report = state.get("last_diagnostic")
+# # #     if not report:
+# # #         return render_error(request, "Please run a diagnostic scan first", status_code=400)
+# # # 
+# # #     resolved_api_key = (api_key or "").strip() or state.get("user_api_key")
+# # #     resolved_base_url = (base_url or "").strip() or state.get("user_base_url", "https://api.openai.com/v1")
+# # #     resolved_model = (model or "").strip() or state.get("user_model", "gpt-4o-mini")
+# # # 
+# # #     if not resolved_api_key:
+# # #         state["routing_assertion_note"] = "Add your API key, then click Run Routing Assertion Test."
+# # #         return render_scan_results(request, state)
+# # # 
+# # #     state["user_api_key"] = resolved_api_key
+# # #     state["user_base_url"] = resolved_base_url
+# # #     state["user_model"] = resolved_model
+# # # 
+# # #     serving = report.get("serving", {})
+# # #     expected_primary = serving.get("primary_model_candidate")
+# # #     expected_fallbacks = serving.get("fallback_chain", []) or []
+# # # 
+# # #     req = CoachRequest(
+# # #         system_prompt=DIAGNOSTIC_COACH_SYSTEM,
+# # #         user_prompt="Routing assertion",
+# # #         model=resolved_model,
+# # #         api_key=resolved_api_key,
+# # #         base_url=resolved_base_url,
+# # #         temperature=0.0,
+# # #         max_tokens=80,
+# # #     )
+# # # 
+# # #     assertion = run_routing_assertion(
+# # #         req,
+# # #         expected_primary=expected_primary,
+# # #         expected_fallbacks=expected_fallbacks,
+# # #     )
+# # #     state["routing_assertion"] = assertion
+# # # 
+# # #     if assertion.get("success"):
+# # #         if assertion.get("verdict") == "pass":
+# # #             state["routing_assertion_note"] = "Assertion passed: responding model aligns with inferred chain."
+# # #         else:
+# # #             state["routing_assertion_note"] = "Assertion warning: response model did not clearly match inferred chain."
+# # #     else:
+# # #         state["routing_assertion_note"] = "Assertion failed: unable to verify runtime routing from API response."
+# # # 
+# # #     return render_scan_results(request, state)
+# # # 
+# # # 
+# # # @app.post("/referee", response_class=HTMLResponse)
+# # # async def referee_change(
+# # #     request: Request,
+# # #     proposed_change: str = Form(...),
+# # #     extra_context: str = Form(""),
+# # # ):
+# # #     state = get_session_state(request)
+# # #     if not state.get("last_diagnostic") or not state.get("user_api_key"):
+# # #         return render_error(request, "Need a recent diagnostic + API key first", status_code=400)
+# # # 
+# # #     prompt = build_referee_prompt(proposed_change, state["last_diagnostic"], extra_context)
+# # #     req = CoachRequest(
+# # #         system_prompt=REFEREE_SYSTEM,
+# # #         user_prompt=prompt,
+# # #         model=state["user_model"],
+# # #         api_key=state["user_api_key"],
+# # #         base_url=state["user_base_url"],
+# # #         temperature=0.2,
+# # #     )
+# # #     response = call_coach(req)
+# # #     if response.success:
+# # #         return templates.TemplateResponse(
+# # #             request=request,
+# # #             name="referee_response.html",
+# # #             context={
+# # #                 "request": request,
+# # #                 "verdict": response.response_text,
+# # #                 "proposed_change": proposed_change,
+# # #             },
+# # #         )
+# # #     return render_error(request, response.error or "Referee failed", status_code=500)
+# # # 
+# # # 
 @app.get("/optimizations", response_class=HTMLResponse)
 async def optimizations_page(request: Request):
     return templates.TemplateResponse(
@@ -1155,7 +1135,6 @@ async def measure_baseline(
         measurement={"label": "Baseline", **baseline},
         note="Initial baseline capture",
     )
-    _store_tuning_insight_to_lancedb({"label": "Baseline", **baseline}, "Initial baseline capture")
 
     return templates.TemplateResponse(
         request=request,
@@ -1318,7 +1297,6 @@ async def measure_again(request: Request, what_changed: str = Form("")):
         note=what_changed,
         baseline=baseline,
     )
-    _store_tuning_insight_to_lancedb(new_measurement, what_changed)
 
     recent_wins = _load_recent_wins(limit=6)
     plat = state.get("platform_info") or detect_platform()

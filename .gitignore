@@ -19,6 +19,11 @@ Thumbs.db
 *.db
 *.log
 
+# Local backup artifacts
+backups/
+*.bak
+*.bak.*
+
 # Secrets — never commit these
 .env
 SESSION_SECRET
